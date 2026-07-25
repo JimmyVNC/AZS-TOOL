@@ -1,0 +1,71 @@
+name: AZSTools
+options:
+  bundleIdPrefix: site.vncard.azs
+  deploymentTarget:
+    macOS: "14.0"
+  createIntermediateGroups: true
+
+configs:
+  Debug: debug
+  Release: release
+
+settings:
+  base:
+    SWIFT_VERSION: "5.9"
+    CLANG_CXX_LANGUAGE_STANDARD: c++17
+    CLANG_CXX_LIBRARY: libc++
+    GCC_C_LANGUAGE_STANDARD: gnu11
+    MACOSX_DEPLOYMENT_TARGET: "14.0"
+    CODE_SIGN_IDENTITY: "-"
+    CODE_SIGN_STYLE: Manual
+    DEVELOPMENT_TEAM: ""
+    ENABLE_HARDENED_RUNTIME: NO
+  configs:
+    Release:
+      # smaller, lighter release binary
+      SWIFT_OPTIMIZATION_LEVEL: "-O"
+      SWIFT_COMPILATION_MODE: wholemodule
+      GCC_OPTIMIZATION_LEVEL: "s"        # optimize C/C++ engine for size
+      DEAD_CODE_STRIPPING: YES
+      DEPLOYMENT_POSTPROCESSING: YES
+      STRIP_INSTALLED_PRODUCT: YES
+      STRIP_STYLE: all
+      COPY_PHASE_STRIP: YES
+      LLVM_LTO: YES
+      # 'none' breaks SwiftUI @EnvironmentObject lookup (fatal error at launch), so use
+      # 'without-names': strips reflection field-name strings for a smaller binary while
+      # keeping the type metadata SwiftUI relies on.
+      SWIFT_REFLECTION_METADATA_LEVEL: without-names
+
+targets:
+  AZSTools:
+    type: application
+    platform: macOS
+    sources:
+      - path: Sources/Engine
+      - path: Sources/Platform
+      - path: Sources/App
+      - path: Sources/Support
+        includes:
+          - "Assets.xcassets"
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: site.vncard.azstools
+        PRODUCT_NAME: AZS Tools
+        INFOPLIST_FILE: Sources/Support/Info.plist
+        CODE_SIGN_ENTITLEMENTS: Sources/Support/mkey.entitlements
+        SWIFT_OBJC_BRIDGING_HEADER: Sources/Support/mkey-Bridging-Header.h
+        HEADER_SEARCH_PATHS:
+          - "$(SRCROOT)/Sources/Engine"
+          - "$(SRCROOT)/Sources/Platform"
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        COMBINE_HIDPI_IMAGES: YES
+        GCC_WARN_64_TO_32_BIT_CONVERSION: NO
+    dependencies:
+      - sdk: Carbon.framework
+      - sdk: Cocoa.framework
+      - sdk: ServiceManagement.framework
+      - sdk: CoreAudio.framework
+      - sdk: AudioToolbox.framework
+      - sdk: IOKit.framework
+      - sdk: CoreDisplay.framework
