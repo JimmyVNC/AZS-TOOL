@@ -1,6 +1,6 @@
-# mkey — Bộ gõ Tiếng Việt cho macOS 26
+# AZS TOOLS — Bộ gõ Tiếng Việt cho macOS 26
 
-**mkey** là bộ gõ tiếng Việt cho macOS, xây dựng lại từ engine của dự án mã nguồn mở
+**AZS TOOLS** là bộ gõ tiếng Việt cho macOS, xây dựng lại từ engine của dự án mã nguồn mở
 [OpenKey](https://github.com/tuyenvm/OpenKey) (© Tuyen Mai, GPL v3) với giao diện
 hoàn toàn mới bằng SwiftUI, tối ưu cho macOS 26 (Tahoe trở lên, yêu cầu tối thiểu macOS 14).
 
