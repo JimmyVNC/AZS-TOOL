@@ -4,41 +4,12 @@
 
 **AZS TOOLS** là bộ gõ tiếng Việt cho macOS, xây dựng lại từ engine của dự án mã nguồn mở
 
-[OpenKey](https://github.com/tuyenvm/OpenKey) (© Tuyen Mai, GPL v3) với giao diện
-
-hoàn toàn mới bằng SwiftUI, tối ưu cho macOS 26 (Tahoe trở lên, yêu cầu tối thiểu macOS 14).
+[OpenKey](https://github.com/tuyenvm/OpenKey) (© Tuyen Mai, GPL v3) với với Mkey của Anh Tuân Maclife
 
 
 
-## Có gì mới so với OpenKey
+## Có gì mới
 
-
-
-- **Giao diện SwiftUI hiện đại** kiểu System Settings: sidebar + form nhóm,
-
-  hỗ trợ Dark Mode tự nhiên, thay cho storyboard/Objective-C cũ.
-
-- **MenuBarExtra** thuần SwiftUI với icon VI/EN vẽ runtime (template image,
-
-  tự đổi màu theo menu bar sáng/tối).
-
-- **SMAppService** cho "Khởi động cùng macOS" — bỏ hẳn helper app
-
-  `OpenKeyHelper` và API `SMLoginItemSetEnabled` đã deprecated.
-
-- **Event tap tự hồi phục**: xử lý `kCGEventTapDisabledByTimeout` /
-
-  `ByUserInput` — trên macOS mới, tap hay bị hệ thống tắt ngầm khiến bộ gõ
-
-  "chết lặng"; mkey tự bật lại.
-
-- **Luồng xin quyền Trợ năng mới**: banner trong cửa sổ cài đặt + tự phát hiện
-
-  khi được cấp quyền (không cần khởi động lại app).
-
-- Engine C++ gốc được giữ **nguyên vẹn 100%** — mọi tính năng gõ (Telex/VNI,
-
-  5 bảng mã, gõ tắt, chuyển mã, smart switch…) hoạt động như OpenKey.
   **Bên cạnh bộ gõ tiếng Việt, AZS TOOLS tích hợp tab **Tiện ích** giúp thay thế nhiều ứng dụng bên thứ 3:
 - **Điều khiển màn hình ngoài (DDC/CI):**
   - Điều chỉnh trực tiếp Âm lượng và Độ sáng của màn hình ngoài cắm qua HDMI/DisplayPort/USB-C.
