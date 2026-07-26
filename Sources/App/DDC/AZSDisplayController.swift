@@ -9,6 +9,7 @@ struct AZSDisplayTarget: Identifiable, Equatable {
     var brightness: Float
     var brightnessMaximum: UInt16
     var available: Bool
+    var brightnessAvailable: Bool
 }
 
 /// Small DDC facade for external monitor speakers. It uses the same DDC
@@ -20,6 +21,7 @@ final class AZSDisplayController: ObservableObject {
 
     private var armServices: [CGDirectDisplayID: IOAVService] = [:]
     private var intelServices: [CGDirectDisplayID: IntelDDC] = [:]
+    private var volumeRevision: [CGDirectDisplayID: UInt] = [:]
     private let queue = DispatchQueue(label: "site.vncard.azs.ddc", qos: .userInitiated)
 
     private init() { refresh() }
@@ -43,7 +45,7 @@ final class AZSDisplayController: ObservableObject {
             let values = screens.map { screen -> AZSDisplayTarget in
                 let id = screen.azsDisplayID
                 let name = (screen.localizedName.isEmpty ? "Màn hình ngoài" : screen.localizedName)
-                let available = arm[id] != nil || intel[id] != nil
+                let ddcAvailable = arm[id] != nil || intel[id] != nil
                 let volumeReading = self.readVCP(command: 0x62, id: id, arm: arm, intel: intel)
                 let brightnessReading = self.readVCP(command: 0x10, id: id, arm: arm, intel: intel)
                 let volumeMax = volumeReading?.1 ?? 100
@@ -52,7 +54,12 @@ final class AZSDisplayController: ObservableObject {
                 let brightness = brightnessReading.map { brightnessMax == 0 ? 0 : Float($0.0) / Float(brightnessMax) } ?? 0.5
                 return AZSDisplayTarget(id: id, name: name, volume: volume, maximum: volumeMax,
                                         brightness: brightness, brightnessMaximum: brightnessMax,
-                                        available: available)
+                                        // Some monitors accept VCP writes but do not
+                                        // return reliable reads. MonitorControl supports
+                                        // this write-only mode as well, so transport
+                                        // availability must be the capability gate.
+                                        available: ddcAvailable,
+                                        brightnessAvailable: ddcAvailable)
             }
             DispatchQueue.main.async {
                 self.armServices = arm; self.intelServices = intel
@@ -80,6 +87,15 @@ final class AZSDisplayController: ObservableObject {
         return targets.first(where: { $0.available })?.id
     }
 
+    /// Brightness support is independent from speaker-volume support in DDC.
+    var keyboardBrightnessTargetID: CGDirectDisplayID? {
+        if let selectedID,
+           targets.contains(where: { $0.id == selectedID && $0.brightnessAvailable }) {
+            return selectedID
+        }
+        return targets.first(where: { $0.brightnessAvailable })?.id
+    }
+
     /// Changes external-display volume and returns the value actually applied.
     /// Keeping this calculation here means rapid key-repeat events always build
     /// on the latest UI value instead of an earlier asynchronous DDC read.
@@ -94,22 +110,49 @@ final class AZSDisplayController: ObservableObject {
     func setVolume(_ value: Float, for id: CGDirectDisplayID) {
         let normalized = max(0, min(1, value))
         guard let target = targets.first(where: { $0.id == id }), target.available else { return }
+        let previous = target.volume
         let maxValue = target.maximum == 0 ? 100 : target.maximum
         let ddcValue = UInt16(max(0, min(Int(maxValue), Int((normalized * Float(maxValue)).rounded()))))
         if let index = targets.firstIndex(where: { $0.id == id }) { targets[index].volume = normalized }
+        let revision = (volumeRevision[id] ?? 0) &+ 1
+        volumeRevision[id] = revision
         queue.async { [weak self] in
             guard let self else { return }
+            let written: Bool
             if Arm64DDC.isArm64 {
-                _ = Arm64DDC.write(service: self.armServices[id], command: 0x62, value: ddcValue)
+                written = Arm64DDC.write(service: self.armServices[id], command: 0x62, value: ddcValue)
             } else {
-                _ = self.intelServices[id]?.write(command: 0x62, value: ddcValue, errorRecoveryWaitTime: 2000)
+                written = self.intelServices[id]?.write(command: 0x62, value: ddcValue, errorRecoveryWaitTime: 2000) ?? false
+            }
+            guard written else {
+                DispatchQueue.main.async {
+                    guard self.volumeRevision[id] == revision else { return }
+                    if let index = self.targets.firstIndex(where: { $0.id == id }) {
+                        self.targets[index].volume = previous
+                    }
+                }
+                return
+            }
+
+            // DDC writes can be acknowledged without being applied. Read the
+            // value back so the UI always represents the monitor's real state.
+            if let reading = self.readVCP(command: 0x62, id: id,
+                                          arm: self.armServices, intel: self.intelServices) {
+                let actual = reading.1 == 0 ? 0 : Float(reading.0) / Float(reading.1)
+                DispatchQueue.main.async {
+                    guard self.volumeRevision[id] == revision else { return }
+                    if let index = self.targets.firstIndex(where: { $0.id == id }) {
+                        self.targets[index].maximum = reading.1
+                        self.targets[index].volume = max(0, min(1, actual))
+                    }
+                }
             }
         }
     }
 
     @discardableResult
     func stepKeyboardBrightness(by amount: Float) -> (CGDirectDisplayID, Float)? {
-        guard let id = keyboardTargetID else { return nil }
+        guard let id = keyboardBrightnessTargetID else { return nil }
         let value = max(0, min(1, brightness(for: id) + amount))
         setBrightness(value, for: id)
         return (id, value)
@@ -117,7 +160,7 @@ final class AZSDisplayController: ObservableObject {
 
     func setBrightness(_ value: Float, for id: CGDirectDisplayID) {
         let normalized = max(0, min(1, value))
-        guard let target = targets.first(where: { $0.id == id }), target.available else { return }
+        guard let target = targets.first(where: { $0.id == id }), target.brightnessAvailable else { return }
         let maxValue = target.brightnessMaximum == 0 ? 100 : target.brightnessMaximum
         let ddcValue = UInt16(max(0, min(Int(maxValue), Int((normalized * Float(maxValue)).rounded()))))
         if let index = targets.firstIndex(where: { $0.id == id }) { targets[index].brightness = normalized }

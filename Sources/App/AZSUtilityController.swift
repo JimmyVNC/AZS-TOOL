@@ -284,10 +284,13 @@ final class AZSUtilityController: ObservableObject {
         guard key == 0 || key == 1 || key == 2 || key == 3 || key == 7 else { return false }
 
         let displays = AZSDisplayController.shared
-        guard let displayID = displays.keyboardTargetID else {
+        let displayID = (key == 2 || key == 3)
+            ? displays.keyboardBrightnessTargetID
+            : displays.keyboardTargetID
+        guard let displayID else {
             // No external DDC target: allow macOS to update CoreAudio, then show
             // the same percentage HUD for the built-in/default audio output.
-            if state == 0xA {
+            if (key == 0 || key == 1 || key == 7) && state == 0xA {
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.08) {
                     AZSVolumeHUD.shared.show(value: AZSAudio.volume(), muted: AZSAudio.isMuted())
                 }
@@ -320,7 +323,10 @@ final class AZSUtilityController: ObservableObject {
         default: return false
         }
         let displays = AZSDisplayController.shared
-        guard let displayID = displays.keyboardTargetID else { return false }
+        let displayID = (key == 2 || key == 3)
+            ? displays.keyboardBrightnessTargetID
+            : displays.keyboardTargetID
+        guard let displayID else { return false }
         if type == .keyDown {
             applyMediaKey(key, displayID: displayID, displays: displays)
         }

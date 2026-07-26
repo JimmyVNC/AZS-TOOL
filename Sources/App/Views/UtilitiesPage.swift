@@ -33,16 +33,18 @@ struct UtilitiesPage: View {
                         HStack(spacing: 12) {
                             Image(systemName: "speaker.wave.2.fill").foregroundStyle(Color.accentColor)
                             Slider(value: Binding(get: { target.volume }, set: { displays.setVolume($0, for: id) }), in: 0...1)
+                                .disabled(!target.available)
                             Text("\(Int(target.volume * 100))%")
                                 .monospacedDigit().frame(width: 48, alignment: .trailing)
                         }
                         HStack(spacing: 12) {
                             Image(systemName: "sun.max.fill").foregroundStyle(.orange)
                             Slider(value: Binding(get: { target.brightness }, set: { displays.setBrightness($0, for: id) }), in: 0...1)
+                                .disabled(!target.brightnessAvailable)
                             Text("\(Int(target.brightness * 100))%")
                                 .monospacedDigit().frame(width: 48, alignment: .trailing)
                         }
-                        Text(target.available ? "DDC/CI: sẵn sàng" : "Màn hình không hỗ trợ điều khiển âm lượng qua DDC/CI")
+                        Text(target.available ? "Kết nối DDC/CI: sẵn sàng" : "Không tìm thấy kết nối DDC/CI tới màn hình")
                             .font(.footnote).foregroundStyle(target.available ? Color.secondary : Color.orange)
                     }
                 }
