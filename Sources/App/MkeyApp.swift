@@ -113,6 +113,10 @@ struct MenuContent: View {
 
             Divider()
 
+            MenuFanControl()
+
+            Divider()
+
             Button("Bảng điều khiển…") { open(.typing) }
             Button("Tiện ích AZS Tools…") { open(.utilities) }
             Button("Giới thiệu AZS Tools") { open(.about) }
@@ -138,6 +142,56 @@ struct MenuContent: View {
     }
 }
 
+/// Compact fan speed control shown directly in the menu-bar menu.
+/// The full Fan Control page remains available from Utilities for advanced
+/// multi-fan management; this view is optimized for quick one-fan adjustments.
+private struct MenuFanControl: View {
+    @ObservedObject private var controller = AZSFanController.shared
+
+    var body: some View {
+        if controller.fans.isEmpty {
+            Label("Điều chỉnh quạt — đang đọc…", systemImage: "fan")
+                .foregroundStyle(.secondary)
+                .onAppear { controller.start() }
+        } else if let fan = controller.fans.first {
+            let lower = max(0, fan.minimumRPM)
+            let upper = max(lower + 100, fan.maximumRPM)
+            Menu {
+                Text("Hiện tại: \(Int(fan.actualRPM.rounded())) RPM")
+                Text("Mục tiêu: \(Int(fan.targetRPM.rounded())) RPM")
+                Divider()
+                Button("− Giảm 100 RPM") {
+                    controller.setTarget(for: fan.id, rpm: fan.targetRPM - 100)
+                }.disabled(!controller.canControl)
+                Button("＋ Tăng 100 RPM") {
+                    controller.setTarget(for: fan.id, rpm: fan.targetRPM + 100)
+                }.disabled(!controller.canControl)
+                Divider()
+                ForEach(menuRPMPresets(lower: lower, upper: upper), id: \.self) { rpm in
+                    Button("Đặt \(rpm) RPM") {
+                        controller.setTarget(for: fan.id, rpm: Double(rpm))
+                    }.disabled(!controller.canControl)
+                }
+                Divider()
+                Button("Về tự động") { controller.setAuto(for: fan.id) }
+                    .disabled(!controller.canControl || !fan.manual)
+                if !controller.canControl {
+                    Divider()
+                    Button("Bật điều khiển quạt…") { controller.authorizeControl() }
+                }
+            } label: {
+                Label("Điều chỉnh quạt · \(Int(fan.actualRPM.rounded())) RPM", systemImage: "fan")
+            }
+            .onAppear { controller.start() }
+        }
+    }
+
+    private func menuRPMPresets(lower: Double, upper: Double) -> [Int] {
+        let values = [lower, (lower + upper) / 2, upper].map { Int($0.rounded()) }
+        return Array(NSOrderedSet(array: values)) as? [Int] ?? values
+    }
+}
+
 @MainActor
 final class MkeyAppDelegate: NSObject, NSApplicationDelegate {
     private var permissionTimer: Timer?
@@ -154,6 +208,9 @@ final class MkeyAppDelegate: NSObject, NSApplicationDelegate {
         observeQuickConvert()
         observeUpdateAvailable()
         AZSUtilityController.shared.start()
+        // Keep fan telemetry warm so the menu can show the RPM control as soon
+        // as it opens, rather than waiting for the first menu appearance.
+        AZSFanController.shared.start()
 
         // clipboard history runs independently from the engine
         ClipboardManager.shared.startIfEnabled()
