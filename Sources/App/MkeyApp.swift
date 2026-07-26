@@ -160,20 +160,22 @@ private struct MenuFanControl: View {
                 Text("Hiện tại: \(Int(fan.actualRPM.rounded())) RPM")
                 Text("Mục tiêu: \(Int(fan.targetRPM.rounded())) RPM")
                 Divider()
-                Button("− Giảm 100 RPM") {
-                    controller.setTarget(for: fan.id, rpm: fan.targetRPM - 100)
+                Button("− Giảm 250 RPM") {
+                    controller.setTarget(for: fan.id, rpm: fan.targetRPM - 250)
                 }.disabled(!controller.canControl)
-                Button("＋ Tăng 100 RPM") {
-                    controller.setTarget(for: fan.id, rpm: fan.targetRPM + 100)
+                Button("＋ Tăng 250 RPM") {
+                    controller.setTarget(for: fan.id, rpm: fan.targetRPM + 250)
                 }.disabled(!controller.canControl)
                 Divider()
-                ForEach(menuRPMPresets(lower: lower, upper: upper), id: \.self) { rpm in
-                    Button("Đặt \(rpm) RPM") {
-                        controller.setTarget(for: fan.id, rpm: Double(rpm))
-                    }.disabled(!controller.canControl)
+                Menu("Chọn mức quạt") {
+                    ForEach(menuRPMPresets(lower: lower, upper: upper), id: \.rpm) { preset in
+                        Button("\(preset.name) · \(preset.rpm) RPM") {
+                            controller.setTarget(for: fan.id, rpm: Double(preset.rpm))
+                        }.disabled(!controller.canControl)
+                    }
                 }
                 Divider()
-                Button("Về tự động") { controller.setAuto(for: fan.id) }
+                Button("Về tự động (khuyên dùng)") { controller.setAuto(for: fan.id) }
                     .disabled(!controller.canControl || !fan.manual)
                 if !controller.canControl {
                     Divider()
@@ -186,9 +188,15 @@ private struct MenuFanControl: View {
         }
     }
 
-    private func menuRPMPresets(lower: Double, upper: Double) -> [Int] {
-        let values = [lower, (lower + upper) / 2, upper].map { Int($0.rounded()) }
-        return Array(NSOrderedSet(array: values)) as? [Int] ?? values
+    private func menuRPMPresets(lower: Double, upper: Double) -> [(name: String, rpm: Int)] {
+        let span = upper - lower
+        return [
+            ("Êm", Int(lower.rounded())),
+            ("Thấp", Int((lower + span * 0.35).rounded())),
+            ("Cân bằng", Int((lower + span * 0.55).rounded())),
+            ("Mát", Int((lower + span * 0.75).rounded())),
+            ("Tối đa", Int(upper.rounded()))
+        ]
     }
 }
 

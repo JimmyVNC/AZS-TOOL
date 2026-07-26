@@ -440,7 +440,7 @@ final class AZSVolumeHUD {
     private func show(value: Float, muted: Bool, displayID: CGDirectDisplayID?, brightness: Bool) {
         DispatchQueue.main.async {
             if self.panel == nil {
-                let p = NSPanel(contentRect: NSRect(x: 0, y: 0, width: 320, height: 112),
+                let p = NSPanel(contentRect: NSRect(x: 0, y: 0, width: 226, height: 62),
                                 styleMask: [.borderless, .nonactivatingPanel],
                                 backing: .buffered,
                                 defer: false)
@@ -462,7 +462,7 @@ final class AZSVolumeHUD {
             } ?? NSScreen.main
             if let screen {
                 let frame = screen.visibleFrame
-                self.panel?.setFrameOrigin(NSPoint(x: frame.midX - 160, y: frame.minY + 96))
+                self.panel?.setFrameOrigin(NSPoint(x: frame.midX - 113, y: frame.minY + 64))
             }
             self.panel?.orderFrontRegardless()
             self.dismissWorkItem?.cancel()
@@ -492,39 +492,67 @@ private final class AZSVolumeHUDView: NSView {
 
     override func draw(_ dirtyRect: NSRect) {
         super.draw(dirtyRect)
-        let background = NSRect(x: 1, y: 1, width: bounds.width - 2, height: bounds.height - 2)
+        let background = bounds.insetBy(dx: 2, dy: 2)
         let backgroundPath = NSBezierPath(roundedRect: background, xRadius: 18, yRadius: 18)
-        NSColor(calibratedWhite: 0.06, alpha: 0.62).setFill()
+        NSColor(calibratedWhite: 0.055, alpha: 0.86).setFill()
         backgroundPath.fill()
-        NSColor.white.withAlphaComponent(0.16).setStroke()
-        backgroundPath.lineWidth = 1
+
+        // A subtle inner highlight gives the panel a soft glass edge without
+        // the heavy outlined-box appearance of the previous HUD.
+        NSColor.white.withAlphaComponent(0.10).setStroke()
+        backgroundPath.lineWidth = 0.75
         backgroundPath.stroke()
 
-        let icon = brightness ? "☀" : (muted ? "🔇" : "🔊")
-        let iconAttributes: [NSAttributedString.Key: Any] = [
-            .font: NSFont.systemFont(ofSize: 24),
-        ]
-        (icon as NSString).draw(at: NSPoint(x: 24, y: 65), withAttributes: iconAttributes)
+        let iconCircle = NSRect(x: 12, y: 11, width: 40, height: 40)
+        NSColor.white.withAlphaComponent(0.09).setFill()
+        NSBezierPath(ovalIn: iconCircle).fill()
+
+        let symbolName: String
+        if brightness {
+            symbolName = "sun.max.fill"
+        } else if muted || value <= 0.001 {
+            symbolName = "speaker.slash.fill"
+        } else if value < 0.34 {
+            symbolName = "speaker.wave.1.fill"
+        } else if value < 0.67 {
+            symbolName = "speaker.wave.2.fill"
+        } else {
+            symbolName = "speaker.wave.3.fill"
+        }
+        if let image = NSImage(systemSymbolName: symbolName, accessibilityDescription: nil) {
+            let pointConfig = NSImage.SymbolConfiguration(pointSize: 19, weight: .medium)
+            let colorConfig = NSImage.SymbolConfiguration(paletteColors: [
+                brightness ? .systemYellow : .white
+            ])
+            let configured = image.withSymbolConfiguration(pointConfig.applying(colorConfig)) ?? image
+            let imageSize = configured.size
+            let imageRect = NSRect(x: iconCircle.midX - imageSize.width / 2,
+                                   y: iconCircle.midY - imageSize.height / 2,
+                                   width: imageSize.width, height: imageSize.height)
+            configured.draw(in: imageRect)
+        }
 
         let percent = Int((value * 100).rounded())
-        let labelAttributes: [NSAttributedString.Key: Any] = [
-            .font: NSFont.systemFont(ofSize: 17, weight: .semibold),
-            .foregroundColor: NSColor.white,
+        let percentString = "\(percent)%" as NSString
+        let percentAttributes: [NSAttributedString.Key: Any] = [
+            .font: NSFont.monospacedDigitSystemFont(ofSize: 12, weight: .medium),
+            .foregroundColor: NSColor.white.withAlphaComponent(0.76),
         ]
-        let label = brightness ? "Độ sáng \(percent)%" : "Âm lượng \(percent)%"
-        (label as NSString).draw(at: NSPoint(x: 68, y: 67), withAttributes: labelAttributes)
+        let percentWidth = percentString.size(withAttributes: percentAttributes).width
+        percentString.draw(at: NSPoint(x: bounds.width - 14 - percentWidth, y: 24),
+                           withAttributes: percentAttributes)
 
-        let track = NSRect(x: 24, y: 31, width: bounds.width - 48, height: 9)
-        NSColor.white.withAlphaComponent(0.22).setFill()
-        NSBezierPath(roundedRect: track, xRadius: 4.5, yRadius: 4.5).fill()
+        let percentAreaWidth: CGFloat = 38
+        let track = NSRect(x: 64, y: 27.5,
+                           width: bounds.width - 64 - percentAreaWidth - 12,
+                           height: 7)
+        NSColor.white.withAlphaComponent(0.14).setFill()
+        NSBezierPath(roundedRect: track, xRadius: 3.5, yRadius: 3.5).fill()
         let fill = NSRect(x: track.minX, y: track.minY, width: track.width * value, height: track.height)
         if fill.width > 0 {
-            (brightness ? NSColor.systemYellow : NSColor.controlAccentColor).setFill()
-            NSBezierPath(roundedRect: fill, xRadius: 4.5, yRadius: 4.5).fill()
+            (brightness ? NSColor.systemYellow : NSColor.systemBlue).setFill()
+            NSBezierPath(roundedRect: fill, xRadius: 3.5, yRadius: 3.5).fill()
         }
-        let knobX = min(track.maxX - 8, max(track.minX + 8, track.minX + track.width * value))
-        NSColor.white.setFill()
-        NSBezierPath(ovalIn: NSRect(x: knobX - 8, y: 27, width: 16, height: 16)).fill()
     }
 }
 
