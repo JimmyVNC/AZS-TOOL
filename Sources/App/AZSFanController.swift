@@ -21,6 +21,29 @@ enum AZSPrivilegedSMC {
         run(command: "set-auto", index: index, rpm: nil)
     }
 
+    static func isReady() -> Bool {
+        send("ping", to: persistentSocketPath)
+    }
+
+    /// Installs and starts the helper without changing any fan setting.
+    /// This keeps the one-time authorization separate from the first RPM drag.
+    static func authorize() -> Bool {
+        if isReady() {
+            lastErrorMessage = nil
+            return true
+        }
+        let executable = Bundle.main.bundleURL
+            .appendingPathComponent("Contents/Helpers/azs-smc-helper").path
+        guard FileManager.default.isExecutableFile(atPath: executable) else {
+            lastErrorMessage = "Không tìm thấy helper Fan Control trong ứng dụng"
+            return false
+        }
+        installationAttempted = true
+        let installed = installPersistentHelper(executable: executable)
+        if installed { lastErrorMessage = nil }
+        return installed
+    }
+
     static func shutdown() {
         if let socketPath = serverSocketPath {
             _ = send("quit", to: socketPath)
@@ -213,12 +236,14 @@ final class AZSFanController: ObservableObject {
     @Published private(set) var fans: [AZSFanReading] = []
     @Published private(set) var status = "Chưa đọc tốc độ quạt"
     @Published private(set) var isAvailable = false
+    @Published private(set) var canControl = false
 
     private var timer: Timer?
     private init() {}
 
     func start() {
         guard timer == nil else { return }
+        canControl = AZSPrivilegedSMC.isReady()
         refresh()
         timer = Timer.scheduledTimer(withTimeInterval: 2, repeats: true) { [weak self] _ in
             Task { @MainActor in self?.refresh() }
@@ -259,13 +284,24 @@ final class AZSFanController: ObservableObject {
         }
     }
 
+    func authorizeControl() {
+        status = "Đang yêu cầu quyền điều khiển quạt…"
+        canControl = AZSPrivilegedSMC.authorize()
+        status = canControl
+            ? "Đã sẵn sàng — kéo thanh RPM để điều chỉnh"
+            : (AZSPrivilegedSMC.lastErrorMessage ?? "Không thể cấp quyền điều khiển quạt")
+        refresh()
+        if canControl { status = "Đã sẵn sàng — kéo thanh RPM để điều chỉnh" }
+    }
+
     func setTarget(for index: Int, rpm: Double) {
         guard let fan = fans.first(where: { $0.id == index }) else { return }
         let lower = max(0, fan.minimumRPM)
         let upper = max(lower + 100, fan.maximumRPM)
         let clamped = min(max(rpm, lower), upper)
         if AZSSMCSetFanTarget(Int32(index), clamped) != 0 || AZSPrivilegedSMC.setTarget(index: index, rpm: clamped) {
-            status = "Đã đặt Quạt \(index + 1) ở \(Int(clamped)) RPM"
+            canControl = true
+            status = "Đã đặt \(fanName(for: index)) ở \(Int(clamped)) RPM"
             refresh()
         } else {
             status = AZSPrivilegedSMC.lastErrorMessage
@@ -276,7 +312,8 @@ final class AZSFanController: ObservableObject {
 
     func setAuto(for index: Int) {
         if AZSSMCSetFanAuto(Int32(index)) != 0 || AZSPrivilegedSMC.setAuto(index: index) {
-            status = "Quạt \(index + 1) đã về Tự động"
+            canControl = true
+            status = "\(fanName(for: index)) đã về chế độ tự động"
             refresh()
         } else {
             status = AZSPrivilegedSMC.lastErrorMessage
@@ -299,6 +336,12 @@ final class AZSFanController: ObservableObject {
                ?? "Không trả được quạt về tự động")
         refresh()
     }
+
+    func fanName(for index: Int) -> String {
+        if fans.count == 1 { return "Quạt hệ thống" }
+        if fans.count == 2 { return index == 0 ? "Quạt bên trái" : "Quạt bên phải" }
+        return "Quạt hệ thống \(index + 1)"
+    }
 }
 
 struct AZSFanControlSection: View {
@@ -317,13 +360,29 @@ struct AZSFanControlSection: View {
                     .disabled(controller.fans.isEmpty)
             }
 
+
+            if !controller.canControl && !controller.fans.isEmpty {
+                HStack(spacing: 10) {
+                    Image(systemName: "lock.shield")
+                        .foregroundStyle(Color.accentColor)
+                    Text("Cấp quyền một lần để điều chỉnh tốc độ quạt.")
+                        .font(.callout)
+                    Spacer()
+                    Button("Bật điều khiển") { controller.authorizeControl() }
+                        .buttonStyle(.borderedProminent)
+                }
+            }
+
             if controller.fans.isEmpty {
                 Label(controller.status, systemImage: "fan")
                     .foregroundStyle(.secondary)
             } else {
                 VStack(alignment: .leading, spacing: 10) {
                     ForEach(controller.fans) { fan in
-                        AZSFanRow(fan: fan, setTarget: { controller.setTarget(for: fan.id, rpm: $0) }, setAuto: { controller.setAuto(for: fan.id) })
+                        AZSFanRow(name: controller.fanName(for: fan.id), fan: fan,
+                                  enabled: controller.canControl,
+                                  setTarget: { controller.setTarget(for: fan.id, rpm: $0) },
+                                  setAuto: { controller.setAuto(for: fan.id) })
                     }
                 }
             }
@@ -331,7 +390,7 @@ struct AZSFanControlSection: View {
         } header: {
             Label("Fan Control", systemImage: "fan")
         } footer: {
-            Text("Hiển thị RPM hiện tại, cho phép đặt RPM thủ công hoặc trả quạt về chế độ Tự động của macOS.")
+            Text("Kéo và thả thanh RPM để áp dụng ngay. Bạn có thể trả từng quạt hoặc tất cả quạt về chế độ tự động của macOS.")
                 .font(.footnote)
         }
         .onAppear { controller.start() }
@@ -340,13 +399,18 @@ struct AZSFanControlSection: View {
 }
 
 private struct AZSFanRow: View {
+    let name: String
     let fan: AZSFanReading
+    let enabled: Bool
     let setTarget: (Double) -> Void
     let setAuto: () -> Void
     @State private var target: Double
 
-    init(fan: AZSFanReading, setTarget: @escaping (Double) -> Void, setAuto: @escaping () -> Void) {
+    init(name: String, fan: AZSFanReading, enabled: Bool,
+         setTarget: @escaping (Double) -> Void, setAuto: @escaping () -> Void) {
+        self.name = name
         self.fan = fan
+        self.enabled = enabled
         self.setTarget = setTarget
         self.setAuto = setAuto
         _target = State(initialValue: fan.targetRPM)
@@ -357,24 +421,28 @@ private struct AZSFanRow: View {
         let upperBound = max(lowerBound + 100, fan.maximumRPM)
         VStack(alignment: .leading, spacing: 5) {
             HStack {
-                Text("Quạt \(fan.id + 1)").fontWeight(.semibold)
+                Label(name, systemImage: "fan").fontWeight(.semibold)
                 Spacer()
                 Text("\(Int(fan.actualRPM.rounded())) RPM")
                     .font(.title3.weight(.semibold)).monospacedDigit()
                 Text(fan.manual ? "Thủ công" : "Tự động")
                     .font(.caption).foregroundStyle(fan.manual ? .orange : .secondary)
+                Button("Về tự động", action: setAuto)
+                    .buttonStyle(.borderless)
+                    .disabled(!enabled || !fan.manual)
             }
             Text("Giới hạn: \(Int(lowerBound))–\(Int(upperBound)) RPM")
                 .font(.caption).foregroundStyle(.secondary)
             HStack(spacing: 8) {
                 Slider(value: $target,
                        in: lowerBound...upperBound,
-                       step: 50)
+                       step: 50,
+                       onEditingChanged: { editing in
+                           if !editing { setTarget(target) }
+                       })
+                    .disabled(!enabled)
                 Text("\(Int(target.rounded())) RPM")
                     .monospacedDigit().frame(width: 82, alignment: .trailing)
-                Button("Áp dụng") { setTarget(target) }
-                    .buttonStyle(.borderedProminent)
-                Button("Tự động", action: setAuto).buttonStyle(.borderless)
             }
         }
         .onChange(of: fan.targetRPM) { _, newValue in target = newValue }
