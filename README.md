@@ -1,24 +1,19 @@
-# mkey — Bộ gõ Tiếng Việt cho macOS 26
+# AZS Tools — Bộ gõ Tiếng Việt cho macOS 26
 
 **mkey** là bộ gõ tiếng Việt cho macOS, xây dựng lại từ engine của dự án mã nguồn mở
 [OpenKey](https://github.com/tuyenvm/OpenKey) (© Tuyen Mai, GPL v3) với giao diện
-hoàn toàn mới bằng SwiftUI, tối ưu cho macOS 26 (Tahoe trở lên, yêu cầu tối thiểu macOS 14).
+hoàn toàn mới của Mkey , tối ưu cho macOS 26 (Tahoe trở lên, yêu cầu tối thiểu macOS 14).
 
-## Có gì mới so với OpenKey
+## Có gì mới so với MKey
 
-- **Giao diện SwiftUI hiện đại** kiểu System Settings: sidebar + form nhóm,
-  hỗ trợ Dark Mode tự nhiên, thay cho storyboard/Objective-C cũ.
-- **MenuBarExtra** thuần SwiftUI với icon VI/EN vẽ runtime (template image,
-  tự đổi màu theo menu bar sáng/tối).
-- **SMAppService** cho "Khởi động cùng macOS" — bỏ hẳn helper app
-  `OpenKeyHelper` và API `SMLoginItemSetEnabled` đã deprecated.
-- **Event tap tự hồi phục**: xử lý `kCGEventTapDisabledByTimeout` /
-  `ByUserInput` — trên macOS mới, tap hay bị hệ thống tắt ngầm khiến bộ gõ
-  "chết lặng"; mkey tự bật lại.
-- **Luồng xin quyền Trợ năng mới**: banner trong cửa sổ cài đặt + tự phát hiện
-  khi được cấp quyền (không cần khởi động lại app).
-- Engine C++ gốc được giữ **nguyên vẹn 100%** — mọi tính năng gõ (Telex/VNI,
-  5 bảng mã, gõ tắt, chuyển mã, smart switch…) hoạt động như OpenKey.
+1. Core Bộ gõ (Thừa hưởng từ OpenKey & MKey Maclife)​
+Engine C++ gốc của OpenKey + cấu trúc từ MKey Maclife: gõ cực kỳ chuẩn và nhẹ (Telex, VNI, gõ tắt, smart switch...).
+UI mình giữ nguyên bản của Mkey của Maclife
+
+2. Vài tính năng tiện ích nhỏ thêm vào cho tiện nhu cầu:​
+Chỉnh màn hình ngoài (DDC/CI): Kéo thanh độ sáng/âm lượng trực tiếp cho màn phụ qua cổng HDMI/Type-C. Có gán phím tắt chỉnh độ sáng toàn hệ thống.
+Chỉnh quạt (Fan Control): Đọc RPM thực tế từ AppleSMC, thích chỉnh tay hay trả về Tự động cho máy tự lo đều được.
+Đảo chiều cuộn & Remap chuột: Đảo hướng cuộn chuột ngoài độc lập với Trackpad. Remap phím phụ (Button 3 -> Button 10) để mở nhanh Spotlight, Cửa sổ ứng dụng,...
 
 ## Cấu trúc
 
@@ -40,29 +35,9 @@ mkey/
 
 Yêu cầu: macOS 14+, Xcode 16+ (đã kiểm thử với Xcode 26.5 trên macOS 26.5), [XcodeGen](https://github.com/yonaskolb/XcodeGen).
 
-```bash
-brew install xcodegen
-cd mkey
-swift scripts/make_icon.swift Sources/Support/Assets.xcassets/AppIcon.appiconset  # nếu muốn sinh lại icon
-xcodegen generate
-xcodebuild -project mkey.xcodeproj -scheme mkey -configuration Release -derivedDataPath build
-open build/Build/Products/Release/   # chứa mkey.app
-```
 
-## Cài đặt & cấp quyền
-
-1. Kéo `mkey.app` vào thư mục **Applications**.
-2. Mở app — macOS sẽ hỏi quyền **Trợ năng (Accessibility)**:
-   System Settings → Privacy & Security → Accessibility → bật **mkey**.
-3. mkey tự phát hiện khi được cấp quyền và bắt đầu hoạt động (không cần mở lại).
-4. Phím chuyển Việt/Anh mặc định: **⌥Z** (đổi được trong Bảng điều khiển → Bộ gõ).
-
-> **Lưu ý về chữ ký ad-hoc**: bản tự build được ký ad-hoc, nên **mỗi lần build
-> lại** macOS coi là app mới — bạn phải xoá mkey khỏi danh sách Accessibility
-> và cấp quyền lại. Nếu có Apple Developer ID, hãy đặt `DEVELOPMENT_TEAM`
-> trong `project.yml` để tránh điều này.
 
 ## Giấy phép
 
-Engine và phần glue kế thừa từ OpenKey, phát hành theo **GPL v3**.
+Engine và phần glue kế thừa từ OpenKey và Mkey, phát hành theo **GPL v3**.
 Toàn bộ mã mkey (UI SwiftUI, bridge) cũng theo GPL v3.
