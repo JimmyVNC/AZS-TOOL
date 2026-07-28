@@ -114,7 +114,7 @@ struct SettingsRootView: View {
 
             Spacer()
 
-            StatusBadge(isReady: state.accessibilityGranted)
+            StatusBadge(isReady: state.engineReady)
         }
         .padding(14)
         .frame(width: 192)
@@ -150,7 +150,7 @@ private struct StatusBadge: View {
             Circle()
                 .fill(isReady ? Color.green : Color.orange)
                 .frame(width: 7, height: 7)
-            Text(isReady ? "Đã sẵn sàng" : "Cần quyền Trợ năng")
+            Text(isReady ? "Đã sẵn sàng" : "Cần hoàn tất quyền")
                 .font(.caption.weight(.medium))
                 .foregroundStyle(.secondary)
                 .lineLimit(1)

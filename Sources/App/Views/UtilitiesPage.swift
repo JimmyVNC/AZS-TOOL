@@ -4,6 +4,7 @@ import UniformTypeIdentifiers
 struct UtilitiesPage: View {
     @ObservedObject private var utilities = AZSUtilityController.shared
     @ObservedObject private var displays = AZSDisplayController.shared
+    @ObservedObject private var appState = AppState.shared
 
     var body: some View {
         Form {
@@ -70,6 +71,108 @@ struct UtilitiesPage: View {
             AZSFanControlSection()
 
             Section {
+                if utilities.mouseDevices.isEmpty {
+                    Label("Chưa tìm thấy chuột đang kết nối", systemImage: "computermouse")
+                        .foregroundStyle(.secondary)
+                } else {
+                    ForEach(utilities.mouseDevices) { mouse in
+                        HStack(spacing: 10) {
+                            Image(systemName: "computermouse.fill")
+                                .foregroundStyle(Color.accentColor)
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(mouse.displayName)
+                                if let transport = mouse.transport, !transport.isEmpty {
+                                    Text(transport).font(.caption).foregroundStyle(.secondary)
+                                }
+                            }
+                            Spacer()
+                            if let battery = mouse.batteryPercent {
+                                Label("\(battery)%", systemImage: batteryIcon(battery))
+                                    .monospacedDigit()
+                                    .foregroundStyle(battery <= 15 ? Color.red : Color.secondary)
+                            } else {
+                                Text("Không có thông tin pin")
+                                    .font(.caption).foregroundStyle(.secondary)
+                            }
+                        }
+                    }
+                }
+                if !Bundle.main.bundlePath.hasPrefix("/Applications/") {
+                    HStack(alignment: .top, spacing: 8) {
+                        Image(systemName: "externaldrive.badge.exclamationmark").foregroundStyle(.orange)
+                        VStack(alignment: .leading, spacing: 3) {
+                            Text("AZS Tools đang chạy ngoài thư mục Applications")
+                                .font(.footnote)
+                            Text("Hãy kéo app vào Applications rồi mở bản đó. Quyền macOS có thể không khớp nếu chạy trực tiếp từ DMG.")
+                                .font(.caption).foregroundStyle(.secondary)
+                        }
+                    }
+                }
+                if !appState.accessibilityGranted {
+                    HStack(alignment: .top, spacing: 8) {
+                        Image(systemName: "lock.shield").foregroundStyle(.orange)
+                        VStack(alignment: .leading, spacing: 3) {
+                            Text("Bộ gõ chưa có quyền Trợ năng")
+                                .font(.footnote)
+                            Text("Bật quyền cho đúng ứng dụng AZS Tools trong Cài đặt hệ thống, rồi thoát và mở lại app.")
+                                .font(.caption).foregroundStyle(.secondary)
+                        }
+                        Spacer()
+                        Button("Mở quyền…") { openAccessibilitySettings() }
+                            .buttonStyle(.borderless)
+                    }
+                }
+                if !appState.inputMonitoringGranted {
+                    HStack(alignment: .top, spacing: 8) {
+                        Image(systemName: "keyboard.badge.ellipsis").foregroundStyle(.orange)
+                        VStack(alignment: .leading, spacing: 3) {
+                            Text("Bộ gõ và pin chuột chưa có quyền Input Monitoring")
+                                .font(.footnote)
+                            Text("Nếu công tắc đã bật nhưng vẫn báo thiếu, dùng dấu “–” xóa mục AZS Tools cũ, rồi dấu “+” thêm đúng app trong Applications.")
+                                .font(.caption).foregroundStyle(.secondary)
+                        }
+                        Spacer()
+                        Button("Mở quyền…") { openInputMonitoringSettings() }
+                            .buttonStyle(.borderless)
+                    }
+                } else if appState.accessibilityGranted && !appState.eventTapRunning {
+                    HStack(alignment: .top, spacing: 8) {
+                        Image(systemName: "keyboard.badge.exclamationmark").foregroundStyle(.orange)
+                        VStack(alignment: .leading, spacing: 3) {
+                            Text("Đã có quyền nhưng bộ gõ chưa khởi động")
+                                .font(.footnote)
+                            Text("Xóa rồi thêm lại AZS Tools trong cả hai danh sách quyền, sau đó thoát và mở lại app.")
+                                .font(.caption).foregroundStyle(.secondary)
+                        }
+                    }
+                }
+                if utilities.mouseDevices.contains(where: {
+                    ($0.vendorID == 0x046D || $0.vendorID == 0x1532) && $0.batteryPercent == nil
+                }) {
+                    HStack(alignment: .top, spacing: 8) {
+                        Image(systemName: "lock.shield").foregroundStyle(.orange)
+                        VStack(alignment: .leading, spacing: 3) {
+                            Text(appState.inputMonitoringGranted
+                                 ? "Input Monitoring đã bật nhưng chuột chưa trả lời truy vấn pin"
+                                 : "Muốn đọc pin Logitech/Razer, cần quyền Input Monitoring")
+                                .font(.footnote)
+                            Text(appState.inputMonitoringGranted
+                                 ? "Thoát AZS Tools, xóa mục AZS Tools cũ trong cả hai danh sách quyền rồi thêm lại đúng bản /Applications. Mở lại, bấm Quét lại; nếu cần hãy thoát Logi Options+."
+                                 : "Sau khi cấp quyền, thoát và mở lại AZS Tools rồi bấm Quét lại chuột.")
+                                .font(.caption).foregroundStyle(.secondary)
+                        }
+                        Spacer()
+                        Button(appState.inputMonitoringGranted ? "Mở lại cài đặt…" : "Cấp quyền…") {
+                            openInputMonitoringSettings()
+                        }
+                        .buttonStyle(.borderless)
+                    }
+                }
+                Button("Quét lại chuột") { utilities.refreshMouseDevices() }
+                    .buttonStyle(.borderless)
+            } header: { Label("Chuột đang sử dụng", systemImage: "computermouse.and.cursorarrow") }
+
+            Section {
                 Toggle("Đảo chiều cuộn toàn hệ thống", isOn: $utilities.reverseScrolling)
                 Text("Áp dụng cho chuột, trackpad và mọi ứng dụng. macOS sẽ yêu cầu quyền Trợ năng nếu chưa cấp.")
                     .font(.footnote).foregroundStyle(.secondary)
@@ -132,6 +235,27 @@ struct UtilitiesPage: View {
         case 4: return "Button 5 — Nút Forward"
         default: return "Button \(button + 1)"
         }
+    }
+
+    private func batteryIcon(_ percent: Int) -> String {
+        switch percent {
+        case ...10: return "battery.0percent"
+        case ...35: return "battery.25percent"
+        case ...65: return "battery.50percent"
+        case ...90: return "battery.75percent"
+        default: return "battery.100percent"
+        }
+    }
+
+    private func openAccessibilitySettings() {
+        guard let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility") else { return }
+        NSWorkspace.shared.open(url)
+    }
+
+    private func openInputMonitoringSettings() {
+        _ = utilities.requestMouseInputMonitoringAccess()
+        guard let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_ListenEvent") else { return }
+        NSWorkspace.shared.open(url)
     }
 
     private func chooseApplication(for button: Int) {

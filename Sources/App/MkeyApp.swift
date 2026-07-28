@@ -64,11 +64,12 @@ struct MenuBarLabel: View {
 struct MenuContent: View {
     @EnvironmentObject private var state: AppState
     @ObservedObject private var clipboard = ClipboardManager.shared
+    @ObservedObject private var utilities = AZSUtilityController.shared
     @Environment(\.openWindow) private var openWindow
 
     var body: some View {
-        if !state.accessibilityGranted {
-            Button("Cấp quyền Trợ năng…") {
+        if !state.engineReady {
+            Button("Hoàn tất quyền bộ gõ…") {
                 openWelcomeWindow()
             }
             Divider()
@@ -114,6 +115,27 @@ struct MenuContent: View {
             Divider()
 
             MenuFanControl()
+
+            if !utilities.mouseDevices.isEmpty {
+                Menu {
+                    ForEach(utilities.mouseDevices) { mouse in
+                        if let battery = mouse.batteryPercent {
+                            Label("\(mouse.displayName) — \(battery)% pin", systemImage: "battery.100percent")
+                        } else {
+                            Label("\(mouse.displayName) — không có thông tin pin", systemImage: "computermouse")
+                        }
+                    }
+                    Divider()
+                    Button("Quét lại") { utilities.refreshMouseDevices() }
+                } label: {
+                    if utilities.mouseDevices.count == 1, let mouse = utilities.mouseDevices.first {
+                        Label(mouse.batteryPercent.map { "Chuột · \($0)% pin" } ?? "Chuột · \(mouse.displayName)",
+                              systemImage: "computermouse")
+                    } else {
+                        Label("Chuột · \(utilities.mouseDevices.count) thiết bị", systemImage: "computermouse")
+                    }
+                }
+            }
 
             Divider()
 
@@ -203,6 +225,8 @@ private struct MenuFanControl: View {
 @MainActor
 final class MkeyAppDelegate: NSObject, NSApplicationDelegate {
     private var permissionTimer: Timer?
+    private var eventTapHealthTimer: Timer?
+    private var didRequestInputMonitoring = false
 
     func applicationWillFinishLaunching(_ notification: Notification) {
         AppState.registerDefaultSettings()
@@ -215,10 +239,12 @@ final class MkeyAppDelegate: NSObject, NSApplicationDelegate {
         registerWorkspaceNotifications()
         observeQuickConvert()
         observeUpdateAvailable()
-        AZSUtilityController.shared.start()
         // Keep fan telemetry warm so the menu can show the RPM control as soon
         // as it opens, rather than waiting for the first menu appearance.
         AZSFanController.shared.start()
+        // Mouse inventory and the M650 log fallback do not depend on the
+        // Vietnamese event tap. Start them even while permissions are pending.
+        AZSUtilityController.shared.start()
 
         // clipboard history runs independently from the engine
         ClipboardManager.shared.startIfEnabled()
@@ -247,14 +273,18 @@ final class MkeyAppDelegate: NSObject, NSApplicationDelegate {
         NotificationCenter.default.addObserver(self, selector: #selector(mkWindowWillClose(_:)),
                                                name: NSWindow.willCloseNotification, object: nil)
 
-        if AXIsProcessTrusted() {
-            startEngine()
-        } else {
-            state.accessibilityGranted = false
+        beginEventTapHealthChecks()
+
+        refreshPermissionState()
+        if !state.accessibilityGranted {
             askForAccessibility()
+        } else if !state.inputMonitoringGranted {
+            askForInputMonitoring()
+        } else {
+            startEngine()
         }
 
-        if state.showUIOnStartup || !state.accessibilityGranted {
+        if state.showUIOnStartup || !state.engineReady {
             // delay until the MenuBarExtra label is installed and can route the request
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in
                 self?.openSettingsWindow()
@@ -268,6 +298,9 @@ final class MkeyAppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationWillTerminate(_ notification: Notification) {
+        permissionTimer?.invalidate()
+        eventTapHealthTimer?.invalidate()
+        _ = MKBridge.stopEventTap()
         AZSPrivilegedSMC.shutdown()
     }
 
@@ -298,13 +331,58 @@ final class MkeyAppDelegate: NSObject, NSApplicationDelegate {
     // MARK: Engine
 
     private func startEngine() {
-        AppState.shared.accessibilityGranted = true
-        AZSUtilityController.shared.start()
-        if !MKBridge.startEventTap() {
-            // tap creation failed although AX is granted (e.g. permission revoked mid-flight)
-            AppState.shared.accessibilityGranted = false
-            askForAccessibility()
+        refreshPermissionState()
+        guard AppState.shared.accessibilityGranted,
+              AppState.shared.inputMonitoringGranted else {
+            AppState.shared.eventTapRunning = false
+            beginPermissionPolling()
+            return
         }
+        guard MKBridge.startEventTap() else {
+            // Permission may look enabled while TCC still has the ad-hoc code
+            // requirement for an older build. Do not mislabel that as an
+            // Accessibility failure; keep the three diagnostics independent.
+            AppState.shared.eventTapRunning = false
+            return
+        }
+        // A floating search/hotkey editor can suspend composition temporarily.
+        // Starting or rebuilding the global tap must always begin in the normal
+        // typing state, even if a window was interrupted during an app update.
+        MKBridge.setEngineSuspended(false)
+        AppState.shared.eventTapRunning = true
+    }
+
+    /// Event taps can become invalid after sleep, Fast User Switching, or a
+    /// privacy-permission change without terminating the app. `_tapRunning`
+    /// used to stay true forever in that case, so the menu looked enabled while
+    /// no Vietnamese keystrokes were received. Poll the actual Mach-port state
+    /// and rebuild the tap when necessary.
+    private func beginEventTapHealthChecks() {
+        guard eventTapHealthTimer == nil else { return }
+        let timer = Timer(timeInterval: 3.0, repeats: true) { _ in
+            Task { @MainActor in
+                let state = AppState.shared
+                self.refreshPermissionState()
+                guard state.accessibilityGranted, state.inputMonitoringGranted else {
+                    state.eventTapRunning = false
+                    return
+                }
+                if !MKBridge.isEventTapRunning() {
+                    NSLog("AZS input: unhealthy event tap detected; rebuilding")
+                    _ = MKBridge.stopEventTap()
+                    if MKBridge.startEventTap() {
+                        MKBridge.setEngineSuspended(false)
+                        state.eventTapRunning = true
+                    } else {
+                        state.eventTapRunning = false
+                    }
+                } else {
+                    state.eventTapRunning = true
+                }
+            }
+        }
+        RunLoop.main.add(timer, forMode: .common)
+        eventTapHealthTimer = timer
     }
 
     private func askForAccessibility() {
@@ -312,26 +390,61 @@ final class MkeyAppDelegate: NSObject, NSApplicationDelegate {
         let options = [kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String: true] as CFDictionary
         AXIsProcessTrustedWithOptions(options)
 
-        permissionTimer?.invalidate()
-        // .common mode so the poll keeps firing while a modal sheet / menu tracking is up.
+        beginPermissionPolling()
+    }
+
+    private func askForInputMonitoring() {
+        if !didRequestInputMonitoring {
+            didRequestInputMonitoring = true
+            _ = CGRequestListenEventAccess()
+        }
+        beginPermissionPolling()
+    }
+
+    private func beginPermissionPolling() {
+        guard permissionTimer == nil else { return }
+        // .common mode so the poll keeps firing while a modal sheet / menu
+        // tracking session is active.
         let timer = Timer(timeInterval: 1.5, repeats: true) { [weak self] timer in
-            if AXIsProcessTrusted() {
-                timer.invalidate()
-                self?.checkAccessibilityNow()
+            Task { @MainActor in
+                guard let self else { return }
+                self.refreshPermissionState()
+                let state = AppState.shared
+                if state.accessibilityGranted && !state.inputMonitoringGranted {
+                    self.askForInputMonitoring()
+                }
+                if state.accessibilityGranted && state.inputMonitoringGranted {
+                    timer.invalidate()
+                    self.permissionTimer = nil
+                    self.startEngine()
+                }
             }
         }
         RunLoop.main.add(timer, forMode: .common)
         permissionTimer = timer
     }
 
+    private func refreshPermissionState() {
+        let state = AppState.shared
+        state.accessibilityGranted = AXIsProcessTrusted()
+        state.inputMonitoringGranted = CGPreflightListenEventAccess()
+        state.eventTapRunning = MKBridge.isEventTapRunning()
+    }
+
     private func checkAccessibilityNow() {
-        guard AXIsProcessTrusted() else {
-            AppState.shared.accessibilityGranted = false
+        refreshPermissionState()
+        let state = AppState.shared
+        guard state.accessibilityGranted else {
+            beginPermissionPolling()
             return
         }
-        permissionTimer?.invalidate()
-        permissionTimer = nil
-        startEngine()
+        if !state.inputMonitoringGranted {
+            askForInputMonitoring()
+        } else {
+            permissionTimer?.invalidate()
+            permissionTimer = nil
+            startEngine()
+        }
     }
 
     // MARK: Notifications
@@ -382,12 +495,18 @@ final class MkeyAppDelegate: NSObject, NSApplicationDelegate {
     }
 
     @objc private func receiveWake(_ note: Notification) {
-        _ = MKBridge.startEventTap()
+        refreshPermissionState()
+        if AppState.shared.accessibilityGranted && AppState.shared.inputMonitoringGranted {
+            startEngine()
+        } else {
+            beginPermissionPolling()
+        }
         AZSUtilityController.shared.start()
     }
 
     @objc private func receiveSleep(_ note: Notification) {
         _ = MKBridge.stopEventTap()
+        AppState.shared.eventTapRunning = false
     }
 
     @objc private func spaceChanged(_ note: Notification) {
@@ -404,7 +523,7 @@ final class MkeyAppDelegate: NSObject, NSApplicationDelegate {
 
     private func openSettingsWindow() {
         let state = AppState.shared
-        if state.accessibilityGranted {
+        if state.engineReady {
             if let welcomeWindow = NSApp.windows.first(where: { $0.identifier?.rawValue == "welcome" }) {
                 welcomeWindow.close()
             }

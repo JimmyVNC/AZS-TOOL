@@ -61,8 +61,13 @@ static CFRunLoopSourceRef _runLoopSource = NULL;
 static BOOL               _tapRunning = NO;
 
 extern "C" void MKReEnableEventTap(void) {
-    if (_eventTap) {
+    if (_eventTap && CFMachPortIsValid(_eventTap)) {
         CGEventTapEnable(_eventTap, true);
+        _tapRunning = CGEventTapIsEnabled(_eventTap);
+        if (!_tapRunning) {
+            NSLog(@"AZS input: event tap could not be re-enabled (AX trusted=%d)",
+                  AXIsProcessTrusted());
+        }
     }
 }
 
@@ -84,8 +89,21 @@ static void postStateChanged(void) {
 #pragma mark - Engine lifecycle
 
 + (BOOL)startEventTap {
-    if (_tapRunning)
-        return YES;
+    // `_tapRunning` only records that creation once succeeded. macOS can
+    // invalidate or disable the Mach port after sleep, a permission change,
+    // or an app update. Do not report a stale tap as healthy: try to re-enable
+    // it, then rebuild it if the port is no longer usable.
+    if (_tapRunning && _eventTap && CFMachPortIsValid(_eventTap)) {
+        if (!CGEventTapIsEnabled(_eventTap)) {
+            CGEventTapEnable(_eventTap, true);
+        }
+        if (CGEventTapIsEnabled(_eventTap)) {
+            return YES;
+        }
+    }
+    if (_eventTap || _runLoopSource || _tapRunning) {
+        [self stopEventTap];
+    }
 
     MKEngineInit();
 
@@ -111,34 +129,55 @@ static void postStateChanged(void) {
                                  MKEngineCallback,
                                  NULL);
     if (!_eventTap) {
+        NSLog(@"AZS input: CGEventTapCreate failed (AX trusted=%d, PostEvent=%d, Input Monitoring=%d, app=%@)",
+              AXIsProcessTrusted(), CGPreflightPostEventAccess(),
+              CGPreflightListenEventAccess(), NSBundle.mainBundle.bundlePath);
+        _tapRunning = NO;
         return NO;
     }
 
     _runLoopSource = CFMachPortCreateRunLoopSource(kCFAllocatorDefault, _eventTap, 0);
-    CFRunLoopAddSource(CFRunLoopGetMain(), _runLoopSource, kCFRunLoopCommonModes);
-    CGEventTapEnable(_eventTap, true);
-
-    _tapRunning = YES;
-    return YES;
-}
-
-+ (BOOL)stopEventTap {
-    if (_tapRunning) {
-        CFRunLoopRemoveSource(CFRunLoopGetMain(), _runLoopSource, kCFRunLoopCommonModes);
-        CFRelease(_runLoopSource);
-        _runLoopSource = NULL;
-
+    if (!_runLoopSource) {
+        NSLog(@"AZS input: could not create event tap run-loop source");
         CFMachPortInvalidate(_eventTap);
         CFRelease(_eventTap);
         _eventTap = NULL;
-
         _tapRunning = NO;
+        return NO;
     }
+    CFRunLoopAddSource(CFRunLoopGetMain(), _runLoopSource, kCFRunLoopCommonModes);
+    CGEventTapEnable(_eventTap, true);
+
+    _tapRunning = CFMachPortIsValid(_eventTap) && CGEventTapIsEnabled(_eventTap);
+    if (!_tapRunning) {
+        NSLog(@"AZS input: event tap was created but did not become enabled");
+        [self stopEventTap];
+        return NO;
+    }
+    NSLog(@"AZS input: event tap started (app=%@)", NSBundle.mainBundle.bundlePath);
+    return _tapRunning;
+}
+
++ (BOOL)stopEventTap {
+    // Clean up partial taps as well. Creation can fail between allocating the
+    // Mach port and installing its run-loop source, leaving `_tapRunning` NO.
+    if (_runLoopSource) {
+        CFRunLoopRemoveSource(CFRunLoopGetMain(), _runLoopSource, kCFRunLoopCommonModes);
+        CFRelease(_runLoopSource);
+        _runLoopSource = NULL;
+    }
+    if (_eventTap) {
+        CFMachPortInvalidate(_eventTap);
+        CFRelease(_eventTap);
+        _eventTap = NULL;
+    }
+    _tapRunning = NO;
     return YES;
 }
 
 + (BOOL)isEventTapRunning {
-    return _tapRunning;
+    return _tapRunning && _eventTap && CFMachPortIsValid(_eventTap) &&
+           CGEventTapIsEnabled(_eventTap);
 }
 
 #pragma mark - State changes driven by the UI

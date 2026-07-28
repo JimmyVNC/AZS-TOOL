@@ -52,7 +52,16 @@ final class AppState: ObservableObject {
     private var suppressCallbacks = false
 
     @Published var selectedPage: SettingsPage = .typing
-    @Published var accessibilityGranted = true
+    /// Live privacy/runtime health used by onboarding and the menu.  Keeping
+    /// these separate avoids the old false-positive state where Accessibility
+    /// was enabled but Input Monitoring (or the event tap itself) was not.
+    @Published var accessibilityGranted = false
+    @Published var inputMonitoringGranted = false
+    @Published var eventTapRunning = false
+
+    var engineReady: Bool {
+        accessibilityGranted && inputMonitoringGranted && eventTapRunning
+    }
 
     // MARK: Core state
 

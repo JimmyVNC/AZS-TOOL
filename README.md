@@ -1,74 +1,68 @@
-# AZS Tools
+# mkey — Bộ gõ Tiếng Việt cho macOS 26
 
-**AZS Tools** là bộ tiện ích all-in-one cho macOS, đặc biệt tối ưu cho người dùng **Mac mini**. Tích hợp bộ gõ tiếng Việt, điều khiển màn hình DDC/CI, quạt tản nhiệt và quản lý chuột Bluetooth trong một ứng dụng duy nhất.
+**mkey** là bộ gõ tiếng Việt cho macOS, xây dựng lại từ engine của dự án mã nguồn mở
+[OpenKey](https://github.com/tuyenvm/OpenKey) (© Tuyen Mai, GPL v3) với giao diện
+hoàn toàn mới bằng SwiftUI, tối ưu cho macOS 26 (Tahoe trở lên, yêu cầu tối thiểu macOS 14).
 
-> Yêu cầu: macOS 26 (Tahoe) trở lên · Apple Silicon
+## Có gì mới so với OpenKey
 
----
+- **Giao diện SwiftUI hiện đại** kiểu System Settings: sidebar + form nhóm,
+  hỗ trợ Dark Mode tự nhiên, thay cho storyboard/Objective-C cũ.
+- **MenuBarExtra** thuần SwiftUI với icon VI/EN vẽ runtime (template image,
+  tự đổi màu theo menu bar sáng/tối).
+- **SMAppService** cho "Khởi động cùng macOS" — bỏ hẳn helper app
+  `OpenKeyHelper` và API `SMLoginItemSetEnabled` đã deprecated.
+- **Event tap tự hồi phục**: xử lý `kCGEventTapDisabledByTimeout` /
+  `ByUserInput` — trên macOS mới, tap hay bị hệ thống tắt ngầm khiến bộ gõ
+  "chết lặng"; mkey tự bật lại.
+- **Luồng xin quyền Trợ năng mới**: banner trong cửa sổ cài đặt + tự phát hiện
+  khi được cấp quyền (không cần khởi động lại app).
+- Engine C++ gốc được giữ **nguyên vẹn 100%** — mọi tính năng gõ (Telex/VNI,
+  5 bảng mã, gõ tắt, chuyển mã, smart switch…) hoạt động như OpenKey.
 
-## Tính năng
-
-### 🖥️ Điều khiển màn hình ngoài (DDC/CI)
-- Chỉnh **âm lượng** và **độ sáng** màn hình ngoài trực tiếp từ app
-- Hỗ trợ màn hình có DDC/CI — không cần chạm vào nút vật lý
-- Phím tắt tùy chỉnh để tăng/giảm nhanh
-
-### 🌀 Fan Control
-- Xem tốc độ quạt hệ thống realtime (RPM)
-- Điều chỉnh thủ công hoặc để chế độ tự động theo AppleSMC
-
-### 🖱️ Quản lý chuột Bluetooth
-- Xem thiết bị chuột đang kết nối và mức pin
-- Tùy chỉnh nút chuột (Button 3, Button 4...)
-- Đảo chiều cuộn toàn hệ thống
-
-### ⌨️ Bộ gõ tiếng Việt (tích hợp từ mkey / OpenKey)
-- Hỗ trợ Telex, VNI và nhiều bảng mã
-- Gõ tắt, chuyển mã, smart switch
-- MenuBarExtra hiển thị trạng thái VI/EN
-- Khởi động cùng macOS
-
----
-
-## Cài đặt
-
-1. Tải bản mới nhất tại [Releases](https://github.com/JimmyVNC/AZS-TOOL/releases)
-2. Kéo `AZSTools.app` vào thư mục **Applications**
-3. Mở app — cấp quyền **Trợ năng (Accessibility)** khi được yêu cầu:
-   `System Settings → Privacy & Security → Accessibility → bật AZS Tools`
-
-> **Lưu ý:** App được ký ad-hoc (không có Apple Developer ID). Nếu macOS chặn, vào `System Settings → Privacy & Security` và bấm **Open Anyway**.
-
----
-
-## Build từ source
-
-Yêu cầu: Xcode 26+, [XcodeGen](https://github.com/yonaskolb/XcodeGen)
-
+## Cấu trúc
 
 ```
+mkey/
+├── project.yml              # đặc tả XcodeGen
+├── scripts/make_icon.swift  # sinh app icon bằng CoreGraphics
+└── Sources/
+    ├── Engine/              # engine C++ nguyên gốc từ OpenKey (GPL v3)
+    ├── Platform/            # glue ObjC++: event tap, bridge engine ↔ Swift
+    │   ├── MKGlobals.h      # khai báo biến cấu hình cho Swift
+    │   ├── MKBridge.h/.mm   # facade: tap lifecycle, macro, chuyển mã
+    │   └── MKEngineHook.mm  # CGEventTap callback + key synthesis
+    ├── App/                 # SwiftUI: MenuBarExtra, Settings, AppState
+    └── Support/             # Info.plist, entitlements, bridging header, assets
+```
 
----
+## Build
 
-## Tại sao cần AZS Tools?
+Yêu cầu: macOS 14+, Xcode 16+ (đã kiểm thử với Xcode 26.5 trên macOS 26.5), [XcodeGen](https://github.com/yonaskolb/XcodeGen).
 
-Mac mini không có nút âm lượng hay độ sáng vật lý. Thông thường bạn phải:
-- Vào System Settings để chỉnh màn hình
-- Cài riêng **MonitorControl** cho DDC/CI
-- Cài riêng **Macs Fan Control** cho quạt
-- Cài riêng app bộ gõ tiếng Việt
+```bash
+brew install xcodegen
+cd mkey
+swift scripts/make_icon.swift Sources/Support/Assets.xcassets/AppIcon.appiconset  # nếu muốn sinh lại icon
+xcodegen generate
+xcodebuild -project mkey.xcodeproj -scheme mkey -configuration Release -derivedDataPath build
+open build/Build/Products/Release/   # chứa mkey.app
+```
 
-**AZS Tools gộp tất cả vào một chỗ** — tiết kiệm RAM, gọn hơn, ít icon menu bar hơn.
+## Cài đặt & cấp quyền
 
----
+1. Kéo `mkey.app` vào thư mục **Applications**.
+2. Mở app — macOS sẽ hỏi quyền **Trợ năng (Accessibility)**:
+   System Settings → Privacy & Security → Accessibility → bật **mkey**.
+3. mkey tự phát hiện khi được cấp quyền và bắt đầu hoạt động (không cần mở lại).
+4. Phím chuyển Việt/Anh mặc định: **⌥Z** (đổi được trong Bảng điều khiển → Bộ gõ).
 
-## Credit
-
-- Bộ gõ tiếng Việt sử dụng engine từ [OpenKey](https://github.com/tuyenvm/OpenKey) © Tuyen Mai (GPL v3)
-- UI bộ gõ tham khảo từ [mkey](https://github.com/JimmyVNC/AZS-TOOL) — xây dựng lại bằng SwiftUI
-
----
+> **Lưu ý về chữ ký ad-hoc**: bản tự build được ký ad-hoc, nên **mỗi lần build
+> lại** macOS coi là app mới — bạn phải xoá mkey khỏi danh sách Accessibility
+> và cấp quyền lại. Nếu có Apple Developer ID, hãy đặt `DEVELOPMENT_TEAM`
+> trong `project.yml` để tránh điều này.
 
 ## Giấy phép
 
-Phát hành theo **GPL v3** — xem [LICENSE](LICENSE) để biết thêm chi tiết.
+Engine và phần glue kế thừa từ OpenKey, phát hành theo **GPL v3**.
+Toàn bộ mã mkey (UI SwiftUI, bridge) cũng theo GPL v3.
