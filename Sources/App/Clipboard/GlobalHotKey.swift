@@ -35,6 +35,8 @@ final class GlobalHotKey {
     }
 
     static func keyCode(from status: Int32) -> UInt32 {
+        // HotkeyEditor stores the physical virtual-key code in the low byte.
+        // The high byte is only the display character used by the engine.
         UInt32(UInt8(truncatingIfNeeded: status))
     }
 

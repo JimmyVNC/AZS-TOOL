@@ -287,6 +287,9 @@ final class AppState: ObservableObject {
             // strictly opt-in (see CloudSyncManager.isEnabled / MacroPage) — it must not
             // start without explicit user consent, so its default stays false.
             "convertToolAlertWhenCompleted": true,
+            "AZSSmoothScrolling": true,
+            "AZSSmoothScrollSmoothness": 0.72,
+            "AZSSmoothScrollSpeed": 1.0,
         ])
     }
 
@@ -314,8 +317,10 @@ final class AppState: ObservableObject {
                     "vTempOffOpenKey", "vOtherLanguage", "vFixSpotlight", "vUseAXReplacement", "axIncludeApps", "axExcludeApps", "UseMacro", "UseMacroInEnglishMode",
                     "vAutoCapsMacro", "UseSmartSwitchKey", "vRememberCode", "SendKeyStepByStep",
                     "vPerformLayoutCompat", "GrayIcon", "vShowIconOnDock", "ShowUIOnStartup",
-                    "SwitchKeyStatus", "AZSReverseScrolling", "AZSMouseButtonActions",
+                    "SwitchKeyStatus", "AZSReverseScrolling", "AZSSmoothScrolling",
+                    "AZSSmoothScrollSmoothness", "AZSSmoothScrollSpeed", "AZSMouseButtonActions",
                     "AZSMouseButtonApplications", "AZSBrightnessUpHotKey", "AZSBrightnessDownHotKey",
+                    "AZSActionHotKeys", "AZSActionApplicationPath",
                     "AZSMiddleAction", "AZSBackAction", "AZSForwardAction"]
         keys.forEach { defaults.removeObject(forKey: $0) }
 
@@ -356,10 +361,15 @@ final class AppState: ObservableObject {
         // Utility preferences live in their own controller but are part of the
         // same user-facing reset operation.
         AZSUtilityController.shared.reverseScrolling = false
+        AZSUtilityController.shared.smoothScrolling = true
+        AZSUtilityController.shared.smoothScrollSmoothness = 0.72
+        AZSUtilityController.shared.smoothScrollSpeed = 1.0
         AZSUtilityController.shared.buttonActions = [2: .none, 3: .back, 4: .forward]
         AZSUtilityController.shared.buttonApplications = [:]
-        AZSUtilityController.shared.brightnessUpHotKey = Int32(bitPattern: 0xFE0000FE)
-        AZSUtilityController.shared.brightnessDownHotKey = Int32(bitPattern: 0xFE0000FE)
+        AZSUtilityController.shared.actionHotKeys = [:]
+        AZSUtilityController.shared.actionApplicationPath = nil
+        AZSUtilityController.shared.applicationShortcutHotKeys = [:]
+        AZSUtilityController.shared.applicationShortcutPaths = [:]
 
         // push everything into the engine globals in one go
         vLanguage = 1; vInputType = 0; vCodeTable = 0

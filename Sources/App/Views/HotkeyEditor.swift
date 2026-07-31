@@ -192,6 +192,7 @@ private struct HotkeyRecorderRepresentable: NSViewRepresentable {
                 Task { @MainActor in
                     MKBridge.setEngineSuspended(true)
                     ClipboardManager.shared.suspendHotKey()
+                    AZSUtilityController.shared.suspendActionHotKeys()
                 }
 
                 monitor = NSEvent.addLocalMonitorForEvents(matching: [.keyDown, .flagsChanged, .leftMouseDown]) { [weak self] event in
@@ -300,6 +301,7 @@ private struct HotkeyRecorderRepresentable: NSViewRepresentable {
                 Task { @MainActor in
                     MKBridge.setEngineSuspended(false)
                     ClipboardManager.shared.resumeHotKey()
+                    AZSUtilityController.shared.resumeActionHotKeys()
                 }
             }
         }
@@ -310,6 +312,7 @@ private struct HotkeyRecorderRepresentable: NSViewRepresentable {
                 Task { @MainActor in
                     MKBridge.setEngineSuspended(false)
                     ClipboardManager.shared.resumeHotKey()
+                    AZSUtilityController.shared.resumeActionHotKeys()
                 }
             }
         }

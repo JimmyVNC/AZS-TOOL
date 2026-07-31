@@ -5,6 +5,7 @@ struct UtilitiesPage: View {
     @ObservedObject private var utilities = AZSUtilityController.shared
     @ObservedObject private var displays = AZSDisplayController.shared
     @ObservedObject private var appState = AppState.shared
+    @State private var applicationShortcutsExpanded = true
 
     var body: some View {
         Form {
@@ -21,6 +22,35 @@ struct UtilitiesPage: View {
                         .help("Quét lại màn hình ngoài")
                 }
             }
+
+            Section("Thao tác nhanh") {
+                ForEach(AZSMouseAction.customShortcutActions) { action in
+                    HotkeyEditor(status: Binding(
+                        get: { utilities.actionHotKeys[action.rawValue] ?? Int32(bitPattern: 0xFE0000FE) },
+                        set: { utilities.actionHotKeys[action.rawValue] = $0 }
+                    ), label: action.title, allowsModifierOnly: false)
+                }
+                Text("Các thao tác này hoạt động toàn hệ thống khi AZS Tools đang chạy.")
+                    .font(.footnote).foregroundStyle(.secondary)
+            }
+
+            Section {
+                DisclosureGroup("Mở ứng dụng nhanh (tối đa 5)", isExpanded: $applicationShortcutsExpanded) {
+                    ForEach(0..<5, id: \.self) { slot in
+                        ApplicationShortcutRow(
+                            slot: slot,
+                            hotKey: Binding(
+                                get: { utilities.applicationShortcutHotKeys[slot] ?? Int32(bitPattern: 0xFE0000FE) },
+                                set: { utilities.applicationShortcutHotKeys[slot] = $0 }
+                            ),
+                            applicationPath: utilities.applicationShortcutPaths[slot],
+                            chooseApplication: { chooseShortcutApplication(slot: slot) }
+                        )
+                    }
+                }
+                Text("Cut và Dán file đã cắt là cặp lệnh riêng của Finder: dùng Bước 1 với file nguồn, mở thư mục đích rồi dùng Bước 2 để di chuyển. Copy, Paste thông thường, Undo và các shortcut macOS có sẵn không được lặp lại.")
+                    .font(.footnote).foregroundStyle(.secondary)
+            } header: { Label("Phím tắt", systemImage: "command") }
 
             Section {
                 if displays.targets.isEmpty {
@@ -45,26 +75,15 @@ struct UtilitiesPage: View {
                             Text("\(Int(target.brightness * 100))%")
                                 .monospacedDigit().frame(width: 48, alignment: .trailing)
                         }
-                        Text(target.available ? "Kết nối DDC/CI: sẵn sàng" : "Không tìm thấy kết nối DDC/CI tới màn hình")
-                            .font(.footnote).foregroundStyle(target.available ? Color.secondary : Color.orange)
+                        Text(target.isBuiltIn
+                             ? (target.brightnessAvailable ? "Điều khiển độ sáng macOS: sẵn sàng" : "macOS không cho phép điều khiển độ sáng màn hình này")
+                             : (target.available ? "Kết nối DDC/CI: sẵn sàng" : "Không tìm thấy kết nối DDC/CI tới màn hình"))
+                            .font(.footnote)
+                            .foregroundStyle((target.isBuiltIn ? target.brightnessAvailable : target.available) ? Color.secondary : Color.orange)
                     }
                 }
-            } header: { Label("Âm lượng màn hình ngoài", systemImage: "display.and.arrow.down") } footer: {
-                Text("Phím âm lượng và phím tăng/giảm độ sáng mặc định của Mac sẽ điều khiển màn hình đang chọn. Màn hình cần bật DDC/CI trong menu OSD.")
-                    .font(.footnote)
-            }
-
-            Section {
-                HotkeyEditor(status: $utilities.brightnessUpHotKey,
-                             label: "Tăng độ sáng",
-                             allowsModifierOnly: false)
-                HotkeyEditor(status: $utilities.brightnessDownHotKey,
-                             label: "Giảm độ sáng",
-                             allowsModifierOnly: false)
-            } header: {
-                Label("Phím tắt độ sáng tùy chỉnh", systemImage: "sun.max")
-            } footer: {
-                Text("Bấm vào từng ô rồi nhấn tổ hợp phím bạn muốn. Phím tắt hoạt động toàn hệ thống và điều khiển màn hình DDC/CI đang chọn.")
+            } header: { Label("Màn hình", systemImage: "display.and.arrow.down") } footer: {
+                Text("Độ sáng hỗ trợ màn hình tích hợp và màn hình ngoài qua DDC/CI. Âm lượng màn hình cần DDC/CI được bật trong menu OSD.")
                     .font(.footnote)
             }
 
@@ -173,8 +192,31 @@ struct UtilitiesPage: View {
             } header: { Label("Chuột đang sử dụng", systemImage: "computermouse.and.cursorarrow") }
 
             Section {
+                Toggle("Cuộn mượt cho con lăn chuột", isOn: $utilities.smoothScrolling)
+                if utilities.smoothScrolling {
+                    HStack {
+                        Text("Độ mượt")
+                        Slider(value: $utilities.smoothScrollSmoothness,
+                               in: 0.25...1.0,
+                               step: 0.05)
+                        Text("\(Int((utilities.smoothScrollSmoothness * 100).rounded()))%")
+                            .monospacedDigit()
+                            .foregroundStyle(.secondary)
+                            .frame(width: 42, alignment: .trailing)
+                    }
+                    HStack {
+                        Text("Tốc độ")
+                        Slider(value: $utilities.smoothScrollSpeed,
+                               in: 0.5...2.0,
+                               step: 0.05)
+                        Text(String(format: "%.2fx", utilities.smoothScrollSpeed))
+                            .monospacedDigit()
+                            .foregroundStyle(.secondary)
+                            .frame(width: 48, alignment: .trailing)
+                    }
+                }
                 Toggle("Đảo chiều cuộn toàn hệ thống", isOn: $utilities.reverseScrolling)
-                Text("Áp dụng cho chuột, trackpad và mọi ứng dụng. macOS sẽ yêu cầu quyền Trợ năng nếu chưa cấp.")
+                Text("Cuộn mượt chỉ áp dụng cho con lăn chuột từng nấc; trackpad giữ nguyên quán tính native của macOS. Đảo chiều vẫn áp dụng cho cả chuột và trackpad.")
                     .font(.footnote).foregroundStyle(.secondary)
             } header: { Label("Cuộn chuột", systemImage: "arrow.up.arrow.down") }
 
@@ -268,6 +310,45 @@ struct UtilitiesPage: View {
         if panel.runModal() == .OK, let url = panel.url {
             utilities.buttonApplications[button] = url.path
         }
+    }
+
+    private func chooseShortcutApplication(slot: Int) {
+        let panel = NSOpenPanel()
+        panel.title = "Chọn ứng dụng cho phím tắt"
+        panel.message = "Ứng dụng sẽ được mở khi nhấn phím tắt đã gán."
+        panel.allowedContentTypes = [.application]
+        panel.allowsMultipleSelection = false
+        panel.canChooseDirectories = false
+        if panel.runModal() == .OK, let url = panel.url {
+            utilities.applicationShortcutPaths[slot] = url.path
+        }
+    }
+}
+
+private struct ApplicationShortcutRow: View {
+    let slot: Int
+    @Binding var hotKey: Int32
+    let applicationPath: String?
+    let chooseApplication: () -> Void
+
+    private var applicationName: String {
+        applicationPath.map { URL(fileURLWithPath: $0).deletingPathExtension().lastPathComponent } ?? "Chọn ứng dụng"
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            HStack(spacing: 8) {
+                Image(systemName: "app.fill").foregroundStyle(.secondary)
+                Text("Ứng dụng \(slot + 1)").font(.subheadline.weight(.medium))
+                Spacer()
+                Button(applicationName, action: chooseApplication)
+                    .lineLimit(1)
+                    .buttonStyle(.borderless)
+                    .foregroundStyle(applicationPath == nil ? Color.orange : Color.accentColor)
+            }
+            HotkeyEditor(status: $hotKey, label: "Phím tắt", allowsModifierOnly: false)
+        }
+        .padding(.vertical, 3)
     }
 }
 

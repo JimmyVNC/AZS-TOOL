@@ -25,9 +25,17 @@ using namespace std;
 #define LOAD_DATA(VAR, KEY) VAR = (int)[[NSUserDefaults standardUserDefaults] integerForKey:@#KEY]
 
 extern "C" void MKReEnableEventTap(void); //implemented in MKBridge.mm
-// Swift utility router. It mutates scroll events in place and returns non-zero
-// when a media key or mapped mouse button must be consumed.
+// Swift utility router. It mutates pass-through scroll events in place and
+// returns non-zero when an event (including a smoothly replaced wheel event)
+// must be consumed.
 extern "C" int32_t AZSHandleUtilityEvent(uint32_t typeRaw, void *event);
+extern "C" int32_t AZSIsSyntheticSmoothScrollEvent(void *event);
+extern "C" void AZSResetSmoothScroll(void);
+
+// Swift-generated utility key events carry this marker. Passing them through
+// the Vietnamese engine would remap or consume the replacement shortcut before
+// Finder/the frontmost app receives it.
+static const int64_t kAZSUtilityEventMarker = 0x415A535554494C59LL;
 
 // Scroll Reverser updates the attached IOHID event as well as the public
 // CGEvent fields. Without this private payload update, trackpad momentum can
@@ -967,8 +975,28 @@ extern "C" {
         //macOS disables the tap when the callback is too slow or the user holds many keys;
         //re-enable instead of silently dying (frequent on modern macOS)
         if (type == kCGEventTapDisabledByTimeout || type == kCGEventTapDisabledByUserInput) {
+            AZSResetSmoothScroll();
             MKReEnableEventTap();
             return event;
+        }
+
+        if (CGEventGetIntegerValueField(event, kCGEventSourceUserData) == kAZSUtilityEventMarker) {
+            return event;
+        }
+
+        // A synthetic smooth frame is already normalized and (when enabled)
+        // already reversed. Never send it through Utility again, otherwise it
+        // can be smoothed or reversed a second time if a posted event re-enters
+        // the session tap on a particular macOS release.
+        if (type == kCGEventScrollWheel && AZSIsSyntheticSmoothScrollEvent((void *)event)) {
+            return event;
+        }
+
+        // Clicking should brake the remaining wheel tail immediately so the UI
+        // under the pointer never moves after the user starts interacting with it.
+        if (type == kCGEventLeftMouseDown || type == kCGEventRightMouseDown ||
+            type == kCGEventOtherMouseDown) {
+            AZSResetSmoothScroll();
         }
 
         // Route non-typing utilities before the Vietnamese engine. The bridge
@@ -985,7 +1013,7 @@ extern "C" {
         if (type == kCGEventOtherMouseDown || type == kCGEventScrollWheel ||
             type == (CGEventType)NX_SYSDEFINED) {
             const int32_t consumed = AZSHandleUtilityEvent((uint32_t)type, (void *)event);
-            if (type == kCGEventScrollWheel &&
+            if (!consumed && type == kCGEventScrollWheel &&
                 [[NSUserDefaults standardUserDefaults] boolForKey:@"AZSReverseScrolling"]) {
                 AZSReverseScrollHIDPayload(event);
             }

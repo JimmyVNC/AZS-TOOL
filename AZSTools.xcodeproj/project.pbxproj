@@ -7,19 +7,18 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
-		D4B01CC1A2B3C4D5E6F70819 /* AZSBatteryBoiCompatibility.swift in Sources */ = {isa = PBXBuildFile; fileRef = D4B01CC1A2B3C4D5E6F7081A /* AZSBatteryBoiCompatibility.swift */; };
 		0914F9EDE6584FB60283D39F /* UtilitiesPage.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8AB693E2A62BE495C94C1615 /* UtilitiesPage.swift */; };
-		0B6D6E2A1B6E4D9C9F4F19D1 /* AZSFanController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0B6D6E2A1B6E4D9C9F4F19D2 /* AZSFanController.swift */; };
 		0A421E41F1458CC89317FE4E /* AppStyle.swift in Sources */ = {isa = PBXBuildFile; fileRef = 711CEF64813A4AAD2778A16D /* AppStyle.swift */; };
 		140AEB8BFBF4CBFCA100F426 /* MKBridge.mm in Sources */ = {isa = PBXBuildFile; fileRef = C7BAAABB79043811E82069C2 /* MKBridge.mm */; };
 		15F34DDEA5065A0C0134CA4D /* CoreDisplay.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 0BE811FA92DEDDBDEDB33EC8 /* CoreDisplay.framework */; };
 		1A79F4DCF3B3B2EA7FCD6459 /* SettingsRootView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8E12C0FF854CE4F2EA8E8B9D /* SettingsRootView.swift */; };
 		200701665A049A486464420D /* MacroPage.swift in Sources */ = {isa = PBXBuildFile; fileRef = 012E0A8EDCF531FFC5FA815C /* MacroPage.swift */; };
 		22A69B66C8A6F8725C93B44F /* AboutPage.swift in Sources */ = {isa = PBXBuildFile; fileRef = CDAE5D34E13FB5D44B5296C5 /* AboutPage.swift */; };
+		3847C60748D0F210D30FFDD9 /* AZSFanController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8D2BF746FC49C8869E276AB1 /* AZSFanController.swift */; };
 		3DD90405F11192ABED50DD6D /* AZSDisplayController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8994A48C536F34EB95FEA561 /* AZSDisplayController.swift */; };
+		3E384AA8AFB33B88D81FE2BA /* AZSSmoothScrollEngine.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7405BD21DF7BD3E655D2EB9B /* AZSSmoothScrollEngine.swift */; };
 		45344B2DEE959B702E323F84 /* WelcomePage.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2BB620BF8F406350E961382 /* WelcomePage.swift */; };
 		4D1AD47C43CAA1DB14747C40 /* MKEngineHook.mm in Sources */ = {isa = PBXBuildFile; fileRef = 525FAB5F62867B8F4BDC11BF /* MKEngineHook.mm */; };
-		4D1AD47C43CAA1DB14747C41 /* AZSSMC.mm in Sources */ = {isa = PBXBuildFile; fileRef = 4D1AD47C43CAA1DB14747C42 /* AZSSMC.mm */; };
 		50A2907EAB4B1D3A3B54E46F /* MkeyApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = FC8EFB3020E8D574B29514CE /* MkeyApp.swift */; };
 		527AA23FD6595B8C9660C125 /* HotkeyEditor.swift in Sources */ = {isa = PBXBuildFile; fileRef = 18F8030F11A0D35B025EE21F /* HotkeyEditor.swift */; };
 		6A4A313AF915CC5AF1EE0757 /* ClipboardPage.swift in Sources */ = {isa = PBXBuildFile; fileRef = 598DDDAB2A6A3474A00225D1 /* ClipboardPage.swift */; };
@@ -28,8 +27,10 @@
 		6FBD30781536F3CD81B98AED /* Engine.cpp in Sources */ = {isa = PBXBuildFile; fileRef = 8CCB6064E0C5E73E49126CC3 /* Engine.cpp */; };
 		760011DB9C615D895312FC6E /* Carbon.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 499215CA346C9A34B521D2C4 /* Carbon.framework */; };
 		7ACD29DED3BCE19D9EDA01CB /* UpdateChecker.swift in Sources */ = {isa = PBXBuildFile; fileRef = 420C159F9CD740E433C42AF5 /* UpdateChecker.swift */; };
+		7C13F9D116C68D28AE925A83 /* AZSSMC.mm in Sources */ = {isa = PBXBuildFile; fileRef = 499A6C376B0EE12BD22AA3A3 /* AZSSMC.mm */; };
 		810F33EA0B100E869D12C0EA /* Macro.cpp in Sources */ = {isa = PBXBuildFile; fileRef = 6BD56EB4A93B0EB3389412F9 /* Macro.cpp */; };
 		8811C4572D15F9507B4659C6 /* ServiceManagement.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 14B27B386B92285DDC41B19B /* ServiceManagement.framework */; };
+		93C42640DAEDB3A228EA76B4 /* AZSBatteryBoiCompatibility.swift in Sources */ = {isa = PBXBuildFile; fileRef = B79BF9064C3776A10574ECF7 /* AZSBatteryBoiCompatibility.swift */; };
 		96ABCC3AE70CA0758EE43DD7 /* AZSUtilityController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4F3494F226F4F466694FF358 /* AZSUtilityController.swift */; };
 		9B3BDDE1502DCEC6A8235661 /* AudioToolbox.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 294B936E3324D40E1E352F4D /* AudioToolbox.framework */; };
 		A1B568FC09F4988CE08FA1C0 /* Arm64DDC.swift in Sources */ = {isa = PBXBuildFile; fileRef = 586941251ECDD77C0746A623 /* Arm64DDC.swift */; };
@@ -39,6 +40,7 @@
 		BCAC5DCB4C6F07942367B479 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = AF04711F801D638F069F6417 /* Assets.xcassets */; };
 		C6992C31FB7813523D879ED7 /* TypingPage.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4F4B78BCC1788EF5F8D8CCBD /* TypingPage.swift */; };
 		C826B95765241C53E99C3AE9 /* Cocoa.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = FEF090ECBE5AC33D8CA86884 /* Cocoa.framework */; };
+		C9462B3D511604A413B884D0 /* CoreVideo.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 284AEF2E5AD7030FA1D6C61E /* CoreVideo.framework */; };
 		CAE223688CAECA0E3965D20D /* SystemPage.swift in Sources */ = {isa = PBXBuildFile; fileRef = 18923D1D4024940B11944A0E /* SystemPage.swift */; };
 		CD771413FADE5B529659DFDF /* IOKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 810A3CFA8AE75021ACC0C698 /* IOKit.framework */; };
 		E2C10EDC52AFF98B3DD0B5E8 /* ClipboardPicker.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7744C9D94608799F9F63F0AF /* ClipboardPicker.swift */; };
@@ -50,26 +52,24 @@
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
-		D4B01CC1A2B3C4D5E6F7081A /* AZSBatteryBoiCompatibility.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AZSBatteryBoiCompatibility.swift; sourceTree = "<group>"; };
 		012E0A8EDCF531FFC5FA815C /* MacroPage.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MacroPage.swift; sourceTree = "<group>"; };
 		0BE811FA92DEDDBDEDB33EC8 /* CoreDisplay.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = CoreDisplay.framework; path = System/Library/Frameworks/CoreDisplay.framework; sourceTree = SDKROOT; };
-		0B6D6E2A1B6E4D9C9F4F19D2 /* AZSFanController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AZSFanController.swift; sourceTree = "<group>"; };
 		14B27B386B92285DDC41B19B /* ServiceManagement.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = ServiceManagement.framework; path = System/Library/Frameworks/ServiceManagement.framework; sourceTree = SDKROOT; };
 		18923D1D4024940B11944A0E /* SystemPage.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SystemPage.swift; sourceTree = "<group>"; };
 		18F8030F11A0D35B025EE21F /* HotkeyEditor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HotkeyEditor.swift; sourceTree = "<group>"; };
 		210AB69ABB97F3CB17528866 /* MKGlobals.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = MKGlobals.h; sourceTree = "<group>"; };
 		257C8847AEEF20693DFC998B /* AZSTools.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = AZSTools.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		284AEF2E5AD7030FA1D6C61E /* CoreVideo.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = CoreVideo.framework; path = System/Library/Frameworks/CoreVideo.framework; sourceTree = SDKROOT; };
 		294B936E3324D40E1E352F4D /* AudioToolbox.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = AudioToolbox.framework; path = System/Library/Frameworks/AudioToolbox.framework; sourceTree = SDKROOT; };
 		3700FF514588D508CDBDFF34 /* ConvertTool.cpp */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.cpp; path = ConvertTool.cpp; sourceTree = "<group>"; };
 		420C159F9CD740E433C42AF5 /* UpdateChecker.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UpdateChecker.swift; sourceTree = "<group>"; };
 		499215CA346C9A34B521D2C4 /* Carbon.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = Carbon.framework; path = System/Library/Frameworks/Carbon.framework; sourceTree = SDKROOT; };
+		499A6C376B0EE12BD22AA3A3 /* AZSSMC.mm */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.objcpp; path = AZSSMC.mm; sourceTree = "<group>"; };
 		4F20C145455615B3A857B547 /* ConvertPage.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConvertPage.swift; sourceTree = "<group>"; };
 		4F3494F226F4F466694FF358 /* AZSUtilityController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AZSUtilityController.swift; sourceTree = "<group>"; };
 		4F4B78BCC1788EF5F8D8CCBD /* TypingPage.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TypingPage.swift; sourceTree = "<group>"; };
 		5223DF19DAADDC7CA2DE1783 /* Vietnamese.cpp */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.cpp; path = Vietnamese.cpp; sourceTree = "<group>"; };
 		525FAB5F62867B8F4BDC11BF /* MKEngineHook.mm */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.objcpp; path = MKEngineHook.mm; sourceTree = "<group>"; };
-		4D1AD47C43CAA1DB14747C42 /* AZSSMC.mm */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.objcpp; path = AZSSMC.mm; sourceTree = "<group>"; };
-		4D1AD47C43CAA1DB14747C43 /* AZSSMC.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = AZSSMC.h; sourceTree = "<group>"; };
 		55B7D2AB148B4BF12EE4DB43 /* ClipboardManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ClipboardManager.swift; sourceTree = "<group>"; };
 		586941251ECDD77C0746A623 /* Arm64DDC.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Arm64DDC.swift; sourceTree = "<group>"; };
 		598DDDAB2A6A3474A00225D1 /* ClipboardPage.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ClipboardPage.swift; sourceTree = "<group>"; };
@@ -78,6 +78,7 @@
 		6BD56EB4A93B0EB3389412F9 /* Macro.cpp */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.cpp; path = Macro.cpp; sourceTree = "<group>"; };
 		6E7838B6924A5557782AA51F /* DataType.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = DataType.h; sourceTree = "<group>"; };
 		711CEF64813A4AAD2778A16D /* AppStyle.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppStyle.swift; sourceTree = "<group>"; };
+		7405BD21DF7BD3E655D2EB9B /* AZSSmoothScrollEngine.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AZSSmoothScrollEngine.swift; sourceTree = "<group>"; };
 		7744C9D94608799F9F63F0AF /* ClipboardPicker.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ClipboardPicker.swift; sourceTree = "<group>"; };
 		7DB1D076BD6BA27F23653C06 /* IntelDDC.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IntelDDC.swift; sourceTree = "<group>"; };
 		810A3CFA8AE75021ACC0C698 /* IOKit.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = IOKit.framework; path = System/Library/Frameworks/IOKit.framework; sourceTree = SDKROOT; };
@@ -86,16 +87,19 @@
 		8AB693E2A62BE495C94C1615 /* UtilitiesPage.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UtilitiesPage.swift; sourceTree = "<group>"; };
 		8BC0FC20CC6090A11A4415C2 /* SmartSwitchKey.cpp */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.cpp; path = SmartSwitchKey.cpp; sourceTree = "<group>"; };
 		8CCB6064E0C5E73E49126CC3 /* Engine.cpp */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.cpp; path = Engine.cpp; sourceTree = "<group>"; };
+		8D2BF746FC49C8869E276AB1 /* AZSFanController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AZSFanController.swift; sourceTree = "<group>"; };
 		8E12C0FF854CE4F2EA8E8B9D /* SettingsRootView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsRootView.swift; sourceTree = "<group>"; };
 		8E3231D40EF092B18253552B /* Macro.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = Macro.h; sourceTree = "<group>"; };
 		909D8F84898184125A630845 /* CoreAudio.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = CoreAudio.framework; path = System/Library/Frameworks/CoreAudio.framework; sourceTree = SDKROOT; };
 		99771A523C53902F77FCF55C /* mac.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = mac.h; sourceTree = "<group>"; };
+		9D19F009FB70F7C1777A5879 /* AZSSMC.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = AZSSMC.h; sourceTree = "<group>"; };
 		9F740D5E62BDD4DDD321A954 /* ConvertTool.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = ConvertTool.h; sourceTree = "<group>"; };
 		A1C3CA813B580531D101CD9D /* Engine.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = Engine.h; sourceTree = "<group>"; };
 		A2BB620BF8F406350E961382 /* WelcomePage.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WelcomePage.swift; sourceTree = "<group>"; };
 		A6CE7B75C4D31CB2B7EB610A /* SmartSwitchKey.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = SmartSwitchKey.h; sourceTree = "<group>"; };
 		AF04711F801D638F069F6417 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		B3619E4932F1DB37E57D480F /* StatusIcon.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StatusIcon.swift; sourceTree = "<group>"; };
+		B79BF9064C3776A10574ECF7 /* AZSBatteryBoiCompatibility.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AZSBatteryBoiCompatibility.swift; sourceTree = "<group>"; };
 		C7BAAABB79043811E82069C2 /* MKBridge.mm */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.objcpp; path = MKBridge.mm; sourceTree = "<group>"; };
 		CDAE5D34E13FB5D44B5296C5 /* AboutPage.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AboutPage.swift; sourceTree = "<group>"; };
 		CF37DA73871A877860E476F4 /* Vietnamese.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = Vietnamese.h; sourceTree = "<group>"; };
@@ -114,6 +118,7 @@
 				E5091A30910A7F9B63C84617 /* CoreAudio.framework in Frameworks */,
 				9B3BDDE1502DCEC6A8235661 /* AudioToolbox.framework in Frameworks */,
 				CD771413FADE5B529659DFDF /* IOKit.framework in Frameworks */,
+				C9462B3D511604A413B884D0 /* CoreVideo.framework in Frameworks */,
 				15F34DDEA5065A0C0134CA4D /* CoreDisplay.framework in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
@@ -160,11 +165,11 @@
 		3B0923CC0F808160011B6F9C /* Platform */ = {
 			isa = PBXGroup;
 			children = (
+				9D19F009FB70F7C1777A5879 /* AZSSMC.h */,
+				499A6C376B0EE12BD22AA3A3 /* AZSSMC.mm */,
 				698E2C16E5B83F0105C70972 /* MKBridge.h */,
 				C7BAAABB79043811E82069C2 /* MKBridge.mm */,
 				525FAB5F62867B8F4BDC11BF /* MKEngineHook.mm */,
-				4D1AD47C43CAA1DB14747C43 /* AZSSMC.h */,
-				4D1AD47C43CAA1DB14747C42 /* AZSSMC.mm */,
 				210AB69ABB97F3CB17528866 /* MKGlobals.h */,
 			);
 			path = Platform;
@@ -224,6 +229,7 @@
 				FEF090ECBE5AC33D8CA86884 /* Cocoa.framework */,
 				909D8F84898184125A630845 /* CoreAudio.framework */,
 				0BE811FA92DEDDBDEDB33EC8 /* CoreDisplay.framework */,
+				284AEF2E5AD7030FA1D6C61E /* CoreVideo.framework */,
 				810A3CFA8AE75021ACC0C698 /* IOKit.framework */,
 				14B27B386B92285DDC41B19B /* ServiceManagement.framework */,
 			);
@@ -253,9 +259,10 @@
 			isa = PBXGroup;
 			children = (
 				64CB12067021C7200929D2DB /* AppState.swift */,
-				D4B01CC1A2B3C4D5E6F7081A /* AZSBatteryBoiCompatibility.swift */,
+				B79BF9064C3776A10574ECF7 /* AZSBatteryBoiCompatibility.swift */,
+				8D2BF746FC49C8869E276AB1 /* AZSFanController.swift */,
+				7405BD21DF7BD3E655D2EB9B /* AZSSmoothScrollEngine.swift */,
 				4F3494F226F4F466694FF358 /* AZSUtilityController.swift */,
-				0B6D6E2A1B6E4D9C9F4F19D2 /* AZSFanController.swift */,
 				FC8EFB3020E8D574B29514CE /* MkeyApp.swift */,
 				B3619E4932F1DB37E57D480F /* StatusIcon.swift */,
 				420C159F9CD740E433C42AF5 /* UpdateChecker.swift */,
@@ -276,7 +283,7 @@
 				1EAB6FC108A88F85CB90CB58 /* Sources */,
 				387E21F08AC5C2F6F18B749F /* Resources */,
 				644C13239D4355846B5155E9 /* Frameworks */,
-				A17D0C7F9D6A4B6F8D1A2E10 /* Build SMC helper */,
+				E5E7FE096F27408E55D408FD /* Build SMC Helper */,
 			);
 			buildRules = (
 			);
@@ -335,22 +342,24 @@
 /* End PBXResourcesBuildPhase section */
 
 /* Begin PBXShellScriptBuildPhase section */
-		A17D0C7F9D6A4B6F8D1A2E10 /* Build SMC helper */ = {
+		E5E7FE096F27408E55D408FD /* Build SMC Helper */ = {
 			isa = PBXShellScriptBuildPhase;
+			alwaysOutOfDate = 1;
 			buildActionMask = 2147483647;
 			files = (
 			);
+			inputFileListPaths = (
+			);
 			inputPaths = (
-				"$(SRCROOT)/Sources/Platform/AZSSMC.mm",
-				"$(SRCROOT)/Sources/Platform/AZSSMCHelperMain.mm",
-				"$(SRCROOT)/Scripts/build-smc-helper.sh",
+			);
+			name = "Build SMC Helper";
+			outputFileListPaths = (
 			);
 			outputPaths = (
-				"$(TARGET_BUILD_DIR)/$(WRAPPER_NAME)/Contents/Helpers/azs-smc-helper",
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 			shellPath = /bin/sh;
-			shellScript = "\"$SRCROOT/Scripts/build-smc-helper.sh\"\n";
+			shellScript = "#!/bin/sh\nset -e\n\nHELPER_DIR=\"$TARGET_BUILD_DIR/$WRAPPER_NAME/Contents/Helpers\"\nmkdir -p \"$HELPER_DIR\"\n\nAZS_HELPER_ARCH_FLAGS=\"\"\nfor AZS_HELPER_ARCH in $ARCHS; do\n  AZS_HELPER_ARCH_FLAGS=\"$AZS_HELPER_ARCH_FLAGS -arch $AZS_HELPER_ARCH\"\ndone\n\nxcrun clang++ -std=c++17 -O2 $AZS_HELPER_ARCH_FLAGS \\\n  -I\"$SRCROOT/Sources/Platform\" \\\n  \"$SRCROOT/Sources/Platform/AZSSMC.mm\" \\\n  \"$SRCROOT/Sources/Platform/AZSSMCHelperMain.mm\" \\\n  -framework IOKit \\\n  -o \"$HELPER_DIR/azs-smc-helper\"\n\nchmod 755 \"$HELPER_DIR/azs-smc-helper\"\n\n# A nested executable must be signed before Xcode seals the outer app bundle.\n# Otherwise a normal Release build fails at the final CodeSign phase even when\n# the app uses the project's ad-hoc \"Sign to Run Locally\" identity.\nif [ \"${CODE_SIGNING_ALLOWED:-NO}\" = \"YES\" ]; then\n  # Desktop/iCloud-backed build folders can attach FinderInfo/provenance xattrs\n  # to freshly created products; codesign rejects those as resource-fork data.\n  /usr/bin/xattr -cr \"$TARGET_BUILD_DIR/$WRAPPER_NAME\"\n  AZS_HELPER_SIGN_IDENTITY=\"${EXPANDED_CODE_SIGN_IDENTITY:--}\"\n  /usr/bin/codesign --force --sign \"$AZS_HELPER_SIGN_IDENTITY\" \\\n    \"$HELPER_DIR/azs-smc-helper\"\nfi\n";
 		};
 /* End PBXShellScriptBuildPhase section */
 
@@ -359,12 +368,14 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				D4B01CC1A2B3C4D5E6F70819 /* AZSBatteryBoiCompatibility.swift in Sources */,
+				93C42640DAEDB3A228EA76B4 /* AZSBatteryBoiCompatibility.swift in Sources */,
 				3DD90405F11192ABED50DD6D /* AZSDisplayController.swift in Sources */,
+				3847C60748D0F210D30FFDD9 /* AZSFanController.swift in Sources */,
+				7C13F9D116C68D28AE925A83 /* AZSSMC.mm in Sources */,
+				3E384AA8AFB33B88D81FE2BA /* AZSSmoothScrollEngine.swift in Sources */,
 				96ABCC3AE70CA0758EE43DD7 /* AZSUtilityController.swift in Sources */,
 				22A69B66C8A6F8725C93B44F /* AboutPage.swift in Sources */,
 				6CA7A5AB534809E3E151BE2D /* AppState.swift in Sources */,
-				0B6D6E2A1B6E4D9C9F4F19D1 /* AZSFanController.swift in Sources */,
 				0A421E41F1458CC89317FE4E /* AppStyle.swift in Sources */,
 				A1B568FC09F4988CE08FA1C0 /* Arm64DDC.swift in Sources */,
 				E9BF0123C410331C41ED1B0D /* ClipboardManager.swift in Sources */,
@@ -378,7 +389,6 @@
 				EEBA75883834204E53860CD5 /* IntelDDC.swift in Sources */,
 				140AEB8BFBF4CBFCA100F426 /* MKBridge.mm in Sources */,
 				4D1AD47C43CAA1DB14747C40 /* MKEngineHook.mm in Sources */,
-				4D1AD47C43CAA1DB14747C41 /* AZSSMC.mm in Sources */,
 				810F33EA0B100E869D12C0EA /* Macro.cpp in Sources */,
 				200701665A049A486464420D /* MacroPage.swift in Sources */,
 				50A2907EAB4B1D3A3B54E46F /* MkeyApp.swift in Sources */,

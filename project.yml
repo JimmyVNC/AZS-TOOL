@@ -44,6 +44,8 @@ targets:
     sources:
       - path: Sources/Engine
       - path: Sources/Platform
+        excludes:
+          - AZSSMCHelperMain.mm
       - path: Sources/App
       - path: Sources/Support
         includes:
@@ -68,4 +70,9 @@ targets:
       - sdk: CoreAudio.framework
       - sdk: AudioToolbox.framework
       - sdk: IOKit.framework
+      - sdk: CoreVideo.framework
       - sdk: CoreDisplay.framework
+    postBuildScripts:
+      - path: scripts/build-smc-helper.sh
+        name: Build SMC Helper
+        basedOnDependencyAnalysis: false

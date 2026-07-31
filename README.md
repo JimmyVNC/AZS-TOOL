@@ -66,3 +66,8 @@ open build/Build/Products/Release/   # chứa mkey.app
 
 Engine và phần glue kế thừa từ OpenKey, phát hành theo **GPL v3**.
 Toàn bộ mã mkey (UI SwiftUI, bridge) cũng theo GPL v3.
+
+Phần định tuyến sự kiện và lượng tử delta của **Smooth Scrolling** được triển
+khai lại với tham khảo từ [Mac Mouse Fix](https://github.com/noah-nuebling/mac-mouse-fix)
+(© Noah Nuebling, MMF License); đường cong chuyển động tham khảo
+[Mos](https://github.com/Caldis/Mos) của Caldis.

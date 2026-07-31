@@ -301,6 +301,7 @@ final class MkeyAppDelegate: NSObject, NSApplicationDelegate {
         permissionTimer?.invalidate()
         eventTapHealthTimer?.invalidate()
         _ = MKBridge.stopEventTap()
+        AZSSmoothScrollEngine.shared.prepareForSleep()
         AZSPrivilegedSMC.shutdown()
     }
 
@@ -363,6 +364,7 @@ final class MkeyAppDelegate: NSObject, NSApplicationDelegate {
             Task { @MainActor in
                 let state = AppState.shared
                 self.refreshPermissionState()
+                AZSSmoothScrollEngine.shared.resumeAfterWake()
                 guard state.accessibilityGranted, state.inputMonitoringGranted else {
                     state.eventTapRunning = false
                     return
@@ -495,6 +497,7 @@ final class MkeyAppDelegate: NSObject, NSApplicationDelegate {
     }
 
     @objc private func receiveWake(_ note: Notification) {
+        AZSSmoothScrollEngine.shared.resumeAfterWake()
         refreshPermissionState()
         if AppState.shared.accessibilityGranted && AppState.shared.inputMonitoringGranted {
             startEngine()
@@ -502,9 +505,11 @@ final class MkeyAppDelegate: NSObject, NSApplicationDelegate {
             beginPermissionPolling()
         }
         AZSUtilityController.shared.start()
+        AZSDisplayController.shared.refresh()
     }
 
     @objc private func receiveSleep(_ note: Notification) {
+        AZSSmoothScrollEngine.shared.prepareForSleep()
         _ = MKBridge.stopEventTap()
         AppState.shared.eventTapRunning = false
     }

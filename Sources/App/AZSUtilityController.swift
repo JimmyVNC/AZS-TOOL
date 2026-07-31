@@ -437,10 +437,16 @@ private enum AZSRazerHID {
 
 enum AZSMouseAction: String, CaseIterable, Identifiable {
     case none, back, forward
-    case copy, paste, cut, undo, redo, selectAll
+    case copy, paste, cut, moveCutFilesHere, undo, redo, selectAll
     case missionControl, appWindows, desktop, spotlight, lockScreen, screenshot
-    case volumeUp, volumeDown, mute
-    case openApplication
+    case volumeUp, volumeDown, mute, brightnessUp, brightnessDown
+    case openApplication, deleteSelectedFile, pastePlainText, copySelectedPath
+    case showClipboardHistory, toggleVietnamese
+
+    static let customShortcutActions: [AZSMouseAction] = [
+        .cut, .moveCutFilesHere, .deleteSelectedFile, .showClipboardHistory, .toggleVietnamese,
+        .brightnessUp, .brightnessDown
+    ]
 
     var id: String { rawValue }
     var title: String {
@@ -450,13 +456,16 @@ enum AZSMouseAction: String, CaseIterable, Identifiable {
         case .forward: return "Đi tới"
         case .copy: return "Sao chép (⌘C)"
         case .paste: return "Dán (⌘V)"
-        case .cut: return "Cắt (⌘X)"
+        case .cut: return "Cắt file Finder (Bước 1)"
+        case .moveCutFilesHere: return "Dán file đã cắt / Di chuyển tới đây (Bước 2)"
         case .undo: return "Hoàn tác (⌘Z)"
         case .redo: return "Làm lại (⇧⌘Z)"
         case .selectAll: return "Chọn tất cả (⌘A)"
         case .volumeUp: return "Tăng âm lượng"
         case .volumeDown: return "Giảm âm lượng"
         case .mute: return "Tắt/bật âm thanh"
+        case .brightnessUp: return "Tăng độ sáng màn hình"
+        case .brightnessDown: return "Giảm độ sáng màn hình"
         case .missionControl: return "Mission Control"
         case .appWindows: return "Cửa sổ ứng dụng"
         case .desktop: return "Hiện Desktop"
@@ -464,20 +473,34 @@ enum AZSMouseAction: String, CaseIterable, Identifiable {
         case .lockScreen: return "Khóa màn hình"
         case .screenshot: return "Chụp vùng màn hình"
         case .openApplication: return "Mở ứng dụng…"
+        case .deleteSelectedFile: return "Xóa file đang chọn vào Thùng rác"
+        case .pastePlainText: return "Dán dạng văn bản thuần"
+        case .copySelectedPath: return "Copy đường dẫn file đang chọn"
+        case .showClipboardHistory: return "Mở lịch sử Clipboard AZS"
+        case .toggleVietnamese: return "Bật/tắt bộ gõ Tiếng Việt"
         }
     }
 }
 
 final class AZSUtilityController: ObservableObject {
     static let shared = AZSUtilityController()
+    // Keep generated utility shortcuts out of AZS's own keyboard pipeline.
+    // The matching marker is checked by MKEngineHook before Vietnamese input
+    // processing or utility hot-key routing is attempted.
+    private static let syntheticUtilityEventMarker: Int64 = 0x415A535554494C59
 
     @Published var reverseScrolling: Bool { didSet { saveAndRestart() } }
+    @Published var smoothScrolling: Bool { didSet { saveAndRestart() } }
+    @Published var smoothScrollSmoothness: Double { didSet { saveAndRestart() } }
+    @Published var smoothScrollSpeed: Double { didSet { saveAndRestart() } }
     /// CGEvent button numbers start at 2 for the physical middle button. A
     /// dictionary lets users assign any of the common Button 3–10 slots.
     @Published var buttonActions: [Int: AZSMouseAction] { didSet { saveAndRestart() } }
     @Published var buttonApplications: [Int: String] { didSet { saveAndRestart() } }
-    @Published var brightnessUpHotKey: Int32 { didSet { saveBrightnessHotKeys() } }
-    @Published var brightnessDownHotKey: Int32 { didSet { saveBrightnessHotKeys() } }
+    @Published var actionHotKeys: [String: Int32] { didSet { saveActionHotKeys() } }
+    @Published var actionApplicationPath: String? { didSet { saveActionApplication() } }
+    @Published var applicationShortcutHotKeys: [Int: Int32] { didSet { saveApplicationShortcuts() } }
+    @Published var applicationShortcutPaths: [Int: String] { didSet { saveApplicationShortcuts() } }
     @Published private(set) var lastDetectedButton: Int?
     @Published private(set) var mouseDevices: [AZSMouseDevice] = []
     @Published private(set) var inputMonitoringGranted = false
@@ -485,15 +508,24 @@ final class AZSUtilityController: ObservableObject {
     private let defaults = UserDefaults.standard
     private var lock = NSLock()
     private var reverseSnapshot = false
+    private var smoothSnapshot = false
     private var actionsSnapshot: [Int: AZSMouseAction] = [:]
     private var applicationsSnapshot: [Int: String] = [:]
     private var lastExternalVolume: Float = 0.5
-    private let brightnessUpMonitor = GlobalHotKey()
-    private let brightnessDownMonitor = GlobalHotKey()
     private var mouseRefreshTimer: Timer?
+    private var actionHotKeyMonitors: [String: GlobalHotKey] = [:]
 
     private init() {
         reverseScrolling = defaults.bool(forKey: "AZSReverseScrolling")
+        smoothScrolling = defaults.object(forKey: "AZSSmoothScrolling") == nil
+            ? true
+            : defaults.bool(forKey: "AZSSmoothScrolling")
+        smoothScrollSmoothness = defaults.object(forKey: "AZSSmoothScrollSmoothness") == nil
+            ? 0.72
+            : defaults.double(forKey: "AZSSmoothScrollSmoothness")
+        smoothScrollSpeed = defaults.object(forKey: "AZSSmoothScrollSpeed") == nil
+            ? 1.0
+            : defaults.double(forKey: "AZSSmoothScrollSpeed")
         var actions: [Int: AZSMouseAction] = [2: .none, 3: .back, 4: .forward]
         if let saved = defaults.dictionary(forKey: "AZSMouseButtonActions") as? [String: String] {
             for (key, rawValue) in saved {
@@ -514,23 +546,60 @@ final class AZSUtilityController: ObservableObject {
             for (key, path) in saved where Int(key) != nil { applications[Int(key)!] = path }
         }
         buttonApplications = applications
-        let emptyHotKey = Int32(bitPattern: 0xFE0000FE)
         let savedBrightnessUp = Int32(truncatingIfNeeded: defaults.integer(forKey: "AZSBrightnessUpHotKey"))
         let savedBrightnessDown = Int32(truncatingIfNeeded: defaults.integer(forKey: "AZSBrightnessDownHotKey"))
-        brightnessUpHotKey = savedBrightnessUp == 0 ? emptyHotKey : savedBrightnessUp
-        brightnessDownHotKey = savedBrightnessDown == 0 ? emptyHotKey : savedBrightnessDown
+        var savedActions: [String: Int32] = [:]
+        if let saved = defaults.dictionary(forKey: "AZSActionHotKeys") {
+            for (key, value) in saved {
+                if let number = value as? NSNumber {
+                    savedActions[key] = Int32(truncatingIfNeeded: number.int64Value)
+                }
+            }
+        }
+        // Keep only AZS-specific keyboard actions. Enum cases for native macOS
+        // commands remain available to mouse-button mappings and old settings,
+        // but their legacy global hotkeys must no longer be registered.
+        let allowedActionKeys = Set(AZSMouseAction.customShortcutActions.map(\.rawValue))
+        savedActions = savedActions.filter { allowedActionKeys.contains($0.key) }
+        // Migrate the two original brightness-only shortcuts into the unified
+        // action shortcut store once, preserving existing user choices.
+        if savedActions[AZSMouseAction.brightnessUp.rawValue] == nil, savedBrightnessUp != 0 {
+            savedActions[AZSMouseAction.brightnessUp.rawValue] = savedBrightnessUp
+        }
+        if savedActions[AZSMouseAction.brightnessDown.rawValue] == nil, savedBrightnessDown != 0 {
+            savedActions[AZSMouseAction.brightnessDown.rawValue] = savedBrightnessDown
+        }
+        UserDefaults.standard.set(savedActions.mapValues(Int.init), forKey: "AZSActionHotKeys")
+        actionHotKeys = savedActions
+        let legacyApplicationPath = defaults.string(forKey: "AZSActionApplicationPath")
+        actionApplicationPath = legacyApplicationPath
+        var appHotKeys: [Int: Int32] = [:]
+        var appPaths: [Int: String] = [:]
+        if let saved = defaults.dictionary(forKey: "AZSApplicationShortcutHotKeys") as? [String: NSNumber] {
+            for (key, value) in saved { if let slot = Int(key) { appHotKeys[slot] = Int32(truncatingIfNeeded: value.int64Value) } }
+        }
+        if let saved = defaults.dictionary(forKey: "AZSApplicationShortcutPaths") as? [String: String] {
+            for (key, value) in saved { if let slot = Int(key) { appPaths[slot] = value } }
+        }
+        if appHotKeys[0] == nil, let legacy = savedActions[AZSMouseAction.openApplication.rawValue] {
+            appHotKeys[0] = legacy
+        }
+        if appPaths[0] == nil, let legacy = legacyApplicationPath { appPaths[0] = legacy }
+        applicationShortcutHotKeys = appHotKeys
+        applicationShortcutPaths = appPaths
         lastDetectedButton = nil
         inputMonitoringGranted = CGPreflightListenEventAccess()
         refreshSnapshot()
-        brightnessUpMonitor.onPressed = { [weak self] in self?.changeBrightness(by: 0.0625) }
-        brightnessDownMonitor.onPressed = { [weak self] in self?.changeBrightness(by: -0.0625) }
-        registerBrightnessHotKeys()
+        registerActionHotKeys()
     }
 
     func start() {
         // Utility events are routed through MKBridge's Accessibility tap.
         // Keeping this method makes startup/wake lifecycle calls idempotent.
         refreshSnapshot()
+        AZSSmoothScrollEngine.shared.configure(enabled: smoothScrolling,
+                                                smoothness: smoothScrollSmoothness,
+                                                speed: smoothScrollSpeed)
         inputMonitoringGranted = CGPreflightListenEventAccess()
         refreshMouseDevices()
         if mouseRefreshTimer == nil {
@@ -978,6 +1047,9 @@ final class AZSUtilityController: ObservableObject {
 
     private func saveAndRestart() {
         defaults.set(reverseScrolling, forKey: "AZSReverseScrolling")
+        defaults.set(smoothScrolling, forKey: "AZSSmoothScrolling")
+        defaults.set(smoothScrollSmoothness, forKey: "AZSSmoothScrollSmoothness")
+        defaults.set(smoothScrollSpeed, forKey: "AZSSmoothScrollSpeed")
         let saved = buttonActions.reduce(into: [String: String]()) { result, item in
             result[String(item.key)] = item.value.rawValue
         }
@@ -987,22 +1059,65 @@ final class AZSUtilityController: ObservableObject {
         }
         defaults.set(savedApplications, forKey: "AZSMouseButtonApplications")
         refreshSnapshot()
+        AZSSmoothScrollEngine.shared.configure(enabled: smoothScrolling,
+                                                smoothness: smoothScrollSmoothness,
+                                                speed: smoothScrollSpeed)
     }
 
-    private func saveBrightnessHotKeys() {
-        defaults.set(Int(brightnessUpHotKey), forKey: "AZSBrightnessUpHotKey")
-        defaults.set(Int(brightnessDownHotKey), forKey: "AZSBrightnessDownHotKey")
-        registerBrightnessHotKeys()
+    private func saveActionHotKeys() {
+        let allowedActionKeys = Set(AZSMouseAction.customShortcutActions.map(\.rawValue))
+        let filtered = actionHotKeys.filter { allowedActionKeys.contains($0.key) }
+        defaults.set(filtered.mapValues(Int.init), forKey: "AZSActionHotKeys")
+        registerActionHotKeys()
     }
 
-    private func registerBrightnessHotKeys() {
-        brightnessUpMonitor.register(status: brightnessUpHotKey)
-        brightnessDownMonitor.register(status: brightnessDownHotKey)
+    private func saveActionApplication() {
+        defaults.set(actionApplicationPath, forKey: "AZSActionApplicationPath")
+        registerActionHotKeys()
+    }
+
+    private func saveApplicationShortcuts() {
+        defaults.set(applicationShortcutHotKeys.reduce(into: [String: Int]()) { $0[String($1.key)] = Int($1.value) }, forKey: "AZSApplicationShortcutHotKeys")
+        defaults.set(applicationShortcutPaths.reduce(into: [String: String]()) { $0[String($1.key)] = $1.value }, forKey: "AZSApplicationShortcutPaths")
+        registerActionHotKeys()
+    }
+
+    private func registerActionHotKeys() {
+        actionHotKeyMonitors.values.forEach { $0.unregister() }
+        actionHotKeyMonitors.removeAll()
+        for action in AZSMouseAction.customShortcutActions {
+            guard let status = actionHotKeys[action.rawValue] else { continue }
+            let monitor = GlobalHotKey()
+            monitor.onPressed = { [weak self] in
+                self?.perform(action, applicationPath: action == .openApplication ? self?.actionApplicationPath : nil)
+            }
+            monitor.register(status: status)
+            actionHotKeyMonitors[action.rawValue] = monitor
+        }
+        for slot in applicationShortcutHotKeys.keys {
+            guard let status = applicationShortcutHotKeys[slot] else { continue }
+            let monitor = GlobalHotKey()
+            monitor.onPressed = { [weak self] in
+                guard let path = self?.applicationShortcutPaths[slot], FileManager.default.fileExists(atPath: path) else { return }
+                NSWorkspace.shared.open(URL(fileURLWithPath: path))
+            }
+            monitor.register(status: status)
+            actionHotKeyMonitors["openApplication\(slot)"] = monitor
+        }
+    }
+
+    func suspendActionHotKeys() {
+        actionHotKeyMonitors.values.forEach { $0.unregister() }
+    }
+
+    func resumeActionHotKeys() {
+        registerActionHotKeys()
     }
 
     private func refreshSnapshot() {
         lock.lock()
         reverseSnapshot = reverseScrolling
+        smoothSnapshot = smoothScrolling
         actionsSnapshot = buttonActions
         applicationsSnapshot = buttonApplications
         lock.unlock()
@@ -1012,12 +1127,19 @@ final class AZSUtilityController: ObservableObject {
 
         lock.lock()
         let reverse = reverseSnapshot
+        let smooth = smoothSnapshot
         let actions = actionsSnapshot
         let applications = applicationsSnapshot
         lock.unlock()
 
-        if type == .scrollWheel && reverse {
-            reverseScrollEvent(event)
+        if type == .scrollWheel {
+            if reverse { reverseScrollEvent(event) }
+            // Smooth scrolling owns the complete discrete-wheel gesture. Only
+            // consume after the engine confirms that its display-synchronised
+            // replacement path is healthy; otherwise preserve native input.
+            if smooth && AZSSmoothScrollEngine.shared.process(event) {
+                return true
+            }
         }
 
         if type == .otherMouseDown {
@@ -1081,7 +1203,8 @@ final class AZSUtilityController: ObservableObject {
         case .forward: postKey(code: 30, flags: .maskCommand)
         case .copy: postKey(code: 8, flags: .maskCommand)
         case .paste: postKey(code: 9, flags: .maskCommand)
-        case .cut: postKey(code: 7, flags: .maskCommand)
+        case .cut: prepareFinderFileMove()
+        case .moveCutFilesHere: completeFinderFileMove()
         case .undo: postKey(code: 6, flags: .maskCommand)
         case .redo: postKey(code: 6, flags: [.maskCommand, .maskShift])
         case .selectAll: postKey(code: 0, flags: .maskCommand)
@@ -1094,9 +1217,35 @@ final class AZSUtilityController: ObservableObject {
         case .volumeUp: changeVolume(by: 0.0625)
         case .volumeDown: changeVolume(by: -0.0625)
         case .mute: toggleVolumeMute()
+        case .brightnessUp: changeBrightness(by: 0.0625)
+        case .brightnessDown: changeBrightness(by: -0.0625)
         case .openApplication:
             guard let applicationPath, FileManager.default.fileExists(atPath: applicationPath) else { return }
             NSWorkspace.shared.open(URL(fileURLWithPath: applicationPath))
+        case .deleteSelectedFile:
+            var error: NSDictionary?
+            let script = NSAppleScript(source: "tell application \"Finder\" to delete (selection as list)")
+            _ = script?.executeAndReturnError(&error)
+        case .pastePlainText:
+            guard let text = NSPasteboard.general.string(forType: .string) else { return }
+            NSPasteboard.general.clearContents()
+            NSPasteboard.general.setString(text, forType: .string)
+            postKey(code: 9, flags: .maskCommand)
+        case .copySelectedPath:
+            var error: NSDictionary?
+            let script = NSAppleScript(source: "tell application \"Finder\" to get POSIX path of (selection as list)")
+            if let script, let result = script.executeAndReturnError(&error).stringValue {
+                NSPasteboard.general.clearContents()
+                NSPasteboard.general.setString(result, forType: .string)
+            }
+        case .showClipboardHistory:
+            DispatchQueue.main.async {
+                ClipboardManager.shared.togglePicker()
+            }
+        case .toggleVietnamese:
+            DispatchQueue.main.async {
+                AppState.shared.isVietnamese.toggle()
+            }
         }
     }
 
@@ -1110,6 +1259,28 @@ final class AZSUtilityController: ObservableObject {
             AZSAudio.setVolume(AZSAudio.volume() + amount)
             AZSVolumeHUD.shared.show(value: AZSAudio.volume())
         }
+    }
+
+    /// Finder intentionally has no Command-X operation for files. Its native
+    /// move workflow is Command-C followed by Option-Command-V, which preserves
+    /// all Finder pasteboard flavours (aliases, packages and multiple files).
+    private func prepareFinderFileMove() {
+        guard NSWorkspace.shared.frontmostApplication?.bundleIdentifier == "com.apple.finder" else {
+            NSSound.beep()
+            return
+        }
+        postKey(code: 8, flags: .maskCommand)
+    }
+
+    /// Completes the Cut workflow with Finder's native "Move Item Here"
+    /// command. This is intentionally separate from normal Command-V so users
+    /// can assign a convenient key without reintroducing macOS's Paste action.
+    private func completeFinderFileMove() {
+        guard NSWorkspace.shared.frontmostApplication?.bundleIdentifier == "com.apple.finder" else {
+            NSSound.beep()
+            return
+        }
+        postKey(code: 9, flags: [.maskCommand, .maskAlternate])
     }
 
     private func toggleVolumeMute() {
@@ -1134,11 +1305,18 @@ final class AZSUtilityController: ObservableObject {
     }
 
     private func postKey(code: CGKeyCode, flags: CGEventFlags) {
-        let source = CGEventSource(stateID: .hidSystemState)
+        // A Carbon global hotkey has already consumed the physical key event.
+        // Post the generated command through the session tap so the current
+        // frontmost application receives it reliably (not AZS Tools).
+        let source = CGEventSource(stateID: .privateState)
+        source?.localEventsSuppressionInterval = 0
         let down = CGEvent(keyboardEventSource: source, virtualKey: code, keyDown: true)
         let up = CGEvent(keyboardEventSource: source, virtualKey: code, keyDown: false)
-        down?.flags = flags; up?.flags = flags
-        down?.post(tap: .cghidEventTap); up?.post(tap: .cghidEventTap)
+        down?.flags = flags
+        up?.flags = flags
+        down?.setIntegerValueField(.eventSourceUserData, value: Self.syntheticUtilityEventMarker)
+        up?.setIntegerValueField(.eventSourceUserData, value: Self.syntheticUtilityEventMarker)
+        down?.post(tap: .cgSessionEventTap); up?.post(tap: .cgSessionEventTap)
     }
 
     /// Returns true when the media-key event belongs to an external display and

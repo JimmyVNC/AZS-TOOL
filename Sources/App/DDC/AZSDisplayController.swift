@@ -1,4 +1,5 @@
 import AppKit
+import Darwin
 import Foundation
 
 struct AZSDisplayTarget: Identifiable, Equatable {
@@ -10,6 +11,34 @@ struct AZSDisplayTarget: Identifiable, Equatable {
     var brightnessMaximum: UInt16
     var available: Bool
     var brightnessAvailable: Bool
+    let isBuiltIn: Bool
+}
+
+private enum AZSBuiltInBrightness {
+    private typealias GetBrightness = @convention(c) (CGDirectDisplayID, UnsafeMutablePointer<Float>) -> Int32
+    private typealias SetBrightness = @convention(c) (CGDirectDisplayID, Float) -> Int32
+    private static let handle = dlopen("/System/Library/PrivateFrameworks/DisplayServices.framework/DisplayServices", RTLD_LAZY)
+    private static let getFunction: GetBrightness? = symbol("DisplayServicesGetBrightness")
+    private static let setFunction: SetBrightness? = symbol("DisplayServicesSetBrightness")
+
+    static var available: Bool { getFunction != nil && setFunction != nil }
+
+    static func get(_ id: CGDirectDisplayID) -> Float? {
+        guard let getFunction else { return nil }
+        var value: Float = 0
+        return getFunction(id, &value) == 0 ? max(0, min(1, value)) : nil
+    }
+
+    @discardableResult
+    static func set(_ value: Float, for id: CGDirectDisplayID) -> Bool {
+        guard let setFunction else { return false }
+        return setFunction(id, max(0, min(1, value))) == 0
+    }
+
+    private static func symbol<T>(_ name: String) -> T? {
+        guard let handle, let pointer = dlsym(handle, name) else { return nil }
+        return unsafeBitCast(pointer, to: T.self)
+    }
 }
 
 /// Small DDC facade for external monitor speakers. It uses the same DDC
@@ -23,11 +52,46 @@ final class AZSDisplayController: ObservableObject {
     private var intelServices: [CGDirectDisplayID: IntelDDC] = [:]
     private let queue = DispatchQueue(label: "site.vncard.azs.ddc", qos: .userInitiated)
 
-    private init() { refresh() }
+    private init() {
+        // DDC services are invalidated when a monitor is connected, removed,
+        // or the display arrangement changes. Rebuild the mapping instead of
+        // continuing to write through a stale IOAV/I2C service.
+        NotificationCenter.default.addObserver(
+            forName: NSApplication.didChangeScreenParametersNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            self?.refresh()
+        }
+        let workspaceCenter = NSWorkspace.shared.notificationCenter
+        workspaceCenter.addObserver(
+            forName: NSWorkspace.willSleepNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            // Do not keep IOAV/I2C objects across sleep. macOS recreates the
+            // display transport on wake, so these references become stale.
+            self?.queue.async {
+                self?.armServices.removeAll()
+                self?.intelServices.removeAll()
+            }
+        }
+        workspaceCenter.addObserver(
+            forName: NSWorkspace.didWakeNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            // Wait for WindowServer/IOKit to publish the new display services.
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
+                self?.refresh()
+            }
+        }
+        refresh()
+    }
 
     func refresh() {
-        let screens = NSScreen.screens.filter { CGDisplayIsBuiltin($0.azsDisplayID) == 0 }
-        let ids = screens.map { $0.azsDisplayID }
+        let screens = NSScreen.screens
+        let ids = screens.map { $0.azsDisplayID }.filter { CGDisplayIsBuiltin($0) == 0 }
         queue.async { [weak self] in
             guard let self else { return }
             var arm: [CGDirectDisplayID: IOAVService] = [:]
@@ -43,14 +107,18 @@ final class AZSDisplayController: ObservableObject {
             }
             let values = screens.map { screen -> AZSDisplayTarget in
                 let id = screen.azsDisplayID
+                let isBuiltIn = CGDisplayIsBuiltin(id) != 0
                 let name = (screen.localizedName.isEmpty ? "Màn hình ngoài" : screen.localizedName)
                 let ddcAvailable = arm[id] != nil || intel[id] != nil
                 let volumeReading = self.readVCP(command: 0x62, id: id, arm: arm, intel: intel)
-                let brightnessReading = self.readVCP(command: 0x10, id: id, arm: arm, intel: intel)
+                let ddcBrightnessReading = self.readVCP(command: 0x10, id: id, arm: arm, intel: intel)
+                let nativeBrightness = isBuiltIn ? AZSBuiltInBrightness.get(id) : nil
                 let volumeMax = volumeReading?.1 ?? 100
-                let brightnessMax = brightnessReading?.1 ?? 100
+                let brightnessMax = ddcBrightnessReading?.1 ?? 100
                 let volume = volumeReading.map { volumeMax == 0 ? 0 : Float($0.0) / Float(volumeMax) } ?? 0.5
-                let brightness = brightnessReading.map { brightnessMax == 0 ? 0 : Float($0.0) / Float(brightnessMax) } ?? 0.5
+                let brightness = nativeBrightness
+                    ?? ddcBrightnessReading.map { brightnessMax == 0 ? 0 : Float($0.0) / Float(brightnessMax) }
+                    ?? 0.5
                 return AZSDisplayTarget(id: id, name: name, volume: volume, maximum: volumeMax,
                                         brightness: brightness, brightnessMaximum: brightnessMax,
                                         // Some monitors accept VCP writes but do not
@@ -58,7 +126,8 @@ final class AZSDisplayController: ObservableObject {
                                         // this write-only mode as well, so transport
                                         // availability must be the capability gate.
                                         available: ddcAvailable,
-                                        brightnessAvailable: ddcAvailable)
+                                        brightnessAvailable: isBuiltIn ? AZSBuiltInBrightness.available : ddcAvailable,
+                                        isBuiltIn: isBuiltIn)
             }
             DispatchQueue.main.async {
                 self.armServices = arm; self.intelServices = intel
@@ -114,10 +183,14 @@ final class AZSDisplayController: ObservableObject {
         if let index = targets.firstIndex(where: { $0.id == id }) { targets[index].volume = normalized }
         queue.async { [weak self] in
             guard let self else { return }
+            var success = false
             if Arm64DDC.isArm64 {
-                _ = Arm64DDC.write(service: self.armServices[id], command: 0x62, value: ddcValue)
+                success = Arm64DDC.write(service: self.armServices[id], command: 0x62, value: ddcValue)
             } else {
-                _ = self.intelServices[id]?.write(command: 0x62, value: ddcValue, errorRecoveryWaitTime: 2000)
+                success = self.intelServices[id]?.write(command: 0x62, value: ddcValue, errorRecoveryWaitTime: 2000) ?? false
+            }
+            if !success {
+                self.retryWriteAfterReconnect(command: 0x62, value: ddcValue, id: id)
             }
         }
     }
@@ -136,12 +209,42 @@ final class AZSDisplayController: ObservableObject {
         let maxValue = target.brightnessMaximum == 0 ? 100 : target.brightnessMaximum
         let ddcValue = UInt16(max(0, min(Int(maxValue), Int((normalized * Float(maxValue)).rounded()))))
         if let index = targets.firstIndex(where: { $0.id == id }) { targets[index].brightness = normalized }
+        if target.isBuiltIn {
+            _ = AZSBuiltInBrightness.set(normalized, for: id)
+            return
+        }
         queue.async { [weak self] in
             guard let self else { return }
+            var success = false
             if Arm64DDC.isArm64 {
-                _ = Arm64DDC.write(service: self.armServices[id], command: 0x10, value: ddcValue)
+                success = Arm64DDC.write(service: self.armServices[id], command: 0x10, value: ddcValue)
             } else {
-                _ = self.intelServices[id]?.write(command: 0x10, value: ddcValue, errorRecoveryWaitTime: 2000)
+                success = self.intelServices[id]?.write(command: 0x10, value: ddcValue, errorRecoveryWaitTime: 2000) ?? false
+            }
+            if !success {
+                self.retryWriteAfterReconnect(command: 0x10, value: ddcValue, id: id)
+            }
+        }
+    }
+
+    private func retryWriteAfterReconnect(command: UInt8,
+                                          value: UInt16,
+                                          id: CGDirectDisplayID) {
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { return }
+            self.refresh()
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) { [weak self] in
+                guard let self,
+                      let target = self.targets.first(where: { $0.id == id }),
+                      target.available else { return }
+                self.queue.async { [weak self] in
+                    guard let self else { return }
+                    if Arm64DDC.isArm64 {
+                        _ = Arm64DDC.write(service: self.armServices[id], command: command, value: value)
+                    } else {
+                        _ = self.intelServices[id]?.write(command: command, value: value, errorRecoveryWaitTime: 2000)
+                    }
+                }
             }
         }
     }

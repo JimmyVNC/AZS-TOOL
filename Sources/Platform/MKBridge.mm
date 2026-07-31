@@ -54,6 +54,7 @@ extern "C" {
     void OnSpellCheckingChanged(void);
     NSString* ConvertUtil(NSString* str);
     void MKSetEngineSuspended(bool suspended);
+    void AZSResetSmoothScroll(void);
 }
 
 static CFMachPortRef      _eventTap = NULL;
@@ -159,6 +160,7 @@ static void postStateChanged(void) {
 }
 
 + (BOOL)stopEventTap {
+    AZSResetSmoothScroll();
     // Clean up partial taps as well. Creation can fail between allocating the
     // Mach port and installing its run-loop source, leaving `_tapRunning` NO.
     if (_runLoopSource) {
