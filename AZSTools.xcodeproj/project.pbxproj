@@ -14,6 +14,7 @@
 		1A79F4DCF3B3B2EA7FCD6459 /* SettingsRootView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8E12C0FF854CE4F2EA8E8B9D /* SettingsRootView.swift */; };
 		200701665A049A486464420D /* MacroPage.swift in Sources */ = {isa = PBXBuildFile; fileRef = 012E0A8EDCF531FFC5FA815C /* MacroPage.swift */; };
 		22A69B66C8A6F8725C93B44F /* AboutPage.swift in Sources */ = {isa = PBXBuildFile; fileRef = CDAE5D34E13FB5D44B5296C5 /* AboutPage.swift */; };
+		31F2C5D6755BEC7C9DB0C63A /* AZSScrollToZoomEngine.swift in Sources */ = {isa = PBXBuildFile; fileRef = 770233E29CEB2B886E6206CA /* AZSScrollToZoomEngine.swift */; };
 		3847C60748D0F210D30FFDD9 /* AZSFanController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8D2BF746FC49C8869E276AB1 /* AZSFanController.swift */; };
 		3DD90405F11192ABED50DD6D /* AZSDisplayController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8994A48C536F34EB95FEA561 /* AZSDisplayController.swift */; };
 		3E384AA8AFB33B88D81FE2BA /* AZSSmoothScrollEngine.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7405BD21DF7BD3E655D2EB9B /* AZSSmoothScrollEngine.swift */; };
@@ -79,6 +80,7 @@
 		6E7838B6924A5557782AA51F /* DataType.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = DataType.h; sourceTree = "<group>"; };
 		711CEF64813A4AAD2778A16D /* AppStyle.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppStyle.swift; sourceTree = "<group>"; };
 		7405BD21DF7BD3E655D2EB9B /* AZSSmoothScrollEngine.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AZSSmoothScrollEngine.swift; sourceTree = "<group>"; };
+		770233E29CEB2B886E6206CA /* AZSScrollToZoomEngine.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AZSScrollToZoomEngine.swift; sourceTree = "<group>"; };
 		7744C9D94608799F9F63F0AF /* ClipboardPicker.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ClipboardPicker.swift; sourceTree = "<group>"; };
 		7DB1D076BD6BA27F23653C06 /* IntelDDC.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IntelDDC.swift; sourceTree = "<group>"; };
 		810A3CFA8AE75021ACC0C698 /* IOKit.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = IOKit.framework; path = System/Library/Frameworks/IOKit.framework; sourceTree = SDKROOT; };
@@ -261,6 +263,7 @@
 				64CB12067021C7200929D2DB /* AppState.swift */,
 				B79BF9064C3776A10574ECF7 /* AZSBatteryBoiCompatibility.swift */,
 				8D2BF746FC49C8869E276AB1 /* AZSFanController.swift */,
+				770233E29CEB2B886E6206CA /* AZSScrollToZoomEngine.swift */,
 				7405BD21DF7BD3E655D2EB9B /* AZSSmoothScrollEngine.swift */,
 				4F3494F226F4F466694FF358 /* AZSUtilityController.swift */,
 				FC8EFB3020E8D574B29514CE /* MkeyApp.swift */,
@@ -372,6 +375,7 @@
 				3DD90405F11192ABED50DD6D /* AZSDisplayController.swift in Sources */,
 				3847C60748D0F210D30FFDD9 /* AZSFanController.swift in Sources */,
 				7C13F9D116C68D28AE925A83 /* AZSSMC.mm in Sources */,
+				31F2C5D6755BEC7C9DB0C63A /* AZSScrollToZoomEngine.swift in Sources */,
 				3E384AA8AFB33B88D81FE2BA /* AZSSmoothScrollEngine.swift in Sources */,
 				96ABCC3AE70CA0758EE43DD7 /* AZSUtilityController.swift in Sources */,
 				22A69B66C8A6F8725C93B44F /* AboutPage.swift in Sources */,

@@ -364,6 +364,11 @@ final class AppState: ObservableObject {
         AZSUtilityController.shared.smoothScrolling = true
         AZSUtilityController.shared.smoothScrollSmoothness = 0.72
         AZSUtilityController.shared.smoothScrollSpeed = 1.0
+        AZSUtilityController.shared.scrollToZoomEnabled = false
+        AZSUtilityController.shared.scrollToZoomModifier = .option
+        AZSUtilityController.shared.scrollToZoomSensitivity = 1.0
+        AZSUtilityController.shared.scrollToZoomReversed = false
+        AZSUtilityController.shared.scrollToZoomUsesCommandKeys = false
         AZSUtilityController.shared.buttonActions = [2: .none, 3: .back, 4: .forward]
         AZSUtilityController.shared.buttonApplications = [:]
         AZSUtilityController.shared.actionHotKeys = [:]

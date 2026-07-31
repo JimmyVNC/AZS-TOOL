@@ -487,12 +487,17 @@ final class AZSUtilityController: ObservableObject {
     // Keep generated utility shortcuts out of AZS's own keyboard pipeline.
     // The matching marker is checked by MKEngineHook before Vietnamese input
     // processing or utility hot-key routing is attempted.
-    private static let syntheticUtilityEventMarker: Int64 = 0x415A535554494C59
+    static let syntheticUtilityEventMarker: Int64 = 0x415A535554494C59
 
     @Published var reverseScrolling: Bool { didSet { saveAndRestart() } }
     @Published var smoothScrolling: Bool { didSet { saveAndRestart() } }
     @Published var smoothScrollSmoothness: Double { didSet { saveAndRestart() } }
     @Published var smoothScrollSpeed: Double { didSet { saveAndRestart() } }
+    @Published var scrollToZoomEnabled: Bool { didSet { saveAndRestart() } }
+    @Published var scrollToZoomModifier: AZSScrollZoomModifier { didSet { saveAndRestart() } }
+    @Published var scrollToZoomSensitivity: Double { didSet { saveAndRestart() } }
+    @Published var scrollToZoomReversed: Bool { didSet { saveAndRestart() } }
+    @Published var scrollToZoomUsesCommandKeys: Bool { didSet { saveAndRestart() } }
     /// CGEvent button numbers start at 2 for the physical middle button. A
     /// dictionary lets users assign any of the common Button 3–10 slots.
     @Published var buttonActions: [Int: AZSMouseAction] { didSet { saveAndRestart() } }
@@ -526,6 +531,13 @@ final class AZSUtilityController: ObservableObject {
         smoothScrollSpeed = defaults.object(forKey: "AZSSmoothScrollSpeed") == nil
             ? 1.0
             : defaults.double(forKey: "AZSSmoothScrollSpeed")
+        scrollToZoomEnabled = defaults.bool(forKey: "AZSScrollToZoomEnabled")
+        scrollToZoomModifier = AZSScrollZoomModifier(rawValue: defaults.string(forKey: "AZSScrollToZoomModifier") ?? "option") ?? .option
+        scrollToZoomSensitivity = defaults.object(forKey: "AZSScrollToZoomSensitivity") == nil
+            ? 1.0
+            : defaults.double(forKey: "AZSScrollToZoomSensitivity")
+        scrollToZoomReversed = defaults.bool(forKey: "AZSScrollToZoomReversed")
+        scrollToZoomUsesCommandKeys = defaults.bool(forKey: "AZSScrollToZoomUsesCommandKeys")
         var actions: [Int: AZSMouseAction] = [2: .none, 3: .back, 4: .forward]
         if let saved = defaults.dictionary(forKey: "AZSMouseButtonActions") as? [String: String] {
             for (key, rawValue) in saved {
@@ -600,6 +612,7 @@ final class AZSUtilityController: ObservableObject {
         AZSSmoothScrollEngine.shared.configure(enabled: smoothScrolling,
                                                 smoothness: smoothScrollSmoothness,
                                                 speed: smoothScrollSpeed)
+        configureScrollToZoom()
         inputMonitoringGranted = CGPreflightListenEventAccess()
         refreshMouseDevices()
         if mouseRefreshTimer == nil {
@@ -1050,6 +1063,11 @@ final class AZSUtilityController: ObservableObject {
         defaults.set(smoothScrolling, forKey: "AZSSmoothScrolling")
         defaults.set(smoothScrollSmoothness, forKey: "AZSSmoothScrollSmoothness")
         defaults.set(smoothScrollSpeed, forKey: "AZSSmoothScrollSpeed")
+        defaults.set(scrollToZoomEnabled, forKey: "AZSScrollToZoomEnabled")
+        defaults.set(scrollToZoomModifier.rawValue, forKey: "AZSScrollToZoomModifier")
+        defaults.set(scrollToZoomSensitivity, forKey: "AZSScrollToZoomSensitivity")
+        defaults.set(scrollToZoomReversed, forKey: "AZSScrollToZoomReversed")
+        defaults.set(scrollToZoomUsesCommandKeys, forKey: "AZSScrollToZoomUsesCommandKeys")
         let saved = buttonActions.reduce(into: [String: String]()) { result, item in
             result[String(item.key)] = item.value.rawValue
         }
@@ -1062,6 +1080,15 @@ final class AZSUtilityController: ObservableObject {
         AZSSmoothScrollEngine.shared.configure(enabled: smoothScrolling,
                                                 smoothness: smoothScrollSmoothness,
                                                 speed: smoothScrollSpeed)
+        configureScrollToZoom()
+    }
+
+    private func configureScrollToZoom() {
+        AZSScrollToZoomEngine.shared.configure(enabled: scrollToZoomEnabled,
+                                                modifier: scrollToZoomModifier,
+                                                sensitivity: scrollToZoomSensitivity,
+                                                reversed: scrollToZoomReversed,
+                                                usesCommandKeys: scrollToZoomUsesCommandKeys)
     }
 
     private func saveActionHotKeys() {
@@ -1133,6 +1160,9 @@ final class AZSUtilityController: ObservableObject {
         lock.unlock()
 
         if type == .scrollWheel {
+            // Zoom takes ownership before reverse/smooth scrolling so the
+            // physical wheel delta is converted exactly once.
+            if AZSScrollToZoomEngine.shared.process(event) { return true }
             if reverse { reverseScrollEvent(event) }
             // Smooth scrolling owns the complete discrete-wheel gesture. Only
             // consume after the engine confirms that its display-synchronised

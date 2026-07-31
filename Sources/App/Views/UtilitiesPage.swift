@@ -192,6 +192,33 @@ struct UtilitiesPage: View {
             } header: { Label("Chuột đang sử dụng", systemImage: "computermouse.and.cursorarrow") }
 
             Section {
+                Toggle("Cuộn để thu phóng", isOn: $utilities.scrollToZoomEnabled)
+                if utilities.scrollToZoomEnabled {
+                    Picker("Giữ phím để zoom", selection: $utilities.scrollToZoomModifier) {
+                        ForEach(AZSScrollZoomModifier.allCases) { modifier in
+                            Text(modifier.title).tag(modifier)
+                        }
+                    }
+                    HStack {
+                        Text("Tốc độ zoom")
+                        Slider(value: $utilities.scrollToZoomSensitivity,
+                               in: 0.25...3.0,
+                               step: 0.05)
+                        Text(String(format: "%.2fx", utilities.scrollToZoomSensitivity))
+                            .monospacedDigit()
+                            .foregroundStyle(.secondary)
+                            .frame(width: 48, alignment: .trailing)
+                    }
+                    Toggle("Đảo chiều zoom", isOn: $utilities.scrollToZoomReversed)
+                    Toggle("Dùng ⌘+ / ⌘− thay cho cử chỉ zoom", isOn: $utilities.scrollToZoomUsesCommandKeys)
+                    Text(utilities.scrollToZoomUsesCommandKeys
+                         ? "Phù hợp với ứng dụng không hỗ trợ pinch-zoom; mỗi nấc cuộn tương ứng một lần tăng hoặc giảm zoom."
+                         : "Giữ phím đã chọn rồi cuộn để tạo cử chỉ pinch-zoom tại vị trí con trỏ.")
+                        .font(.footnote).foregroundStyle(.secondary)
+                }
+
+                Divider()
+
                 Toggle("Cuộn mượt cho con lăn chuột", isOn: $utilities.smoothScrolling)
                 if utilities.smoothScrolling {
                     HStack {
