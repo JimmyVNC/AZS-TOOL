@@ -253,6 +253,22 @@ final class AZSSmoothScrollEngine {
         if shouldResume { recreateDisplayLink() }
     }
 
+    /// Refresh only the TCC delivery capability during the periodic event-tap
+    /// health check. This must not recreate CVDisplayLink: that check runs every
+    /// three seconds, whereas a poster rebuild is reserved for a real wake or
+    /// event-tap replacement. Rebuilding here briefly stalls the main event-tap
+    /// thread and presents as intermittent pointer/scroll jitter.
+    func refreshPostEventAccess() {
+        let canPost = CGPreflightPostEventAccess()
+        lock.lock()
+        let lostAccess = postEventAccess && !canPost
+        postEventAccess = canPost
+        if lostAccess {
+            resetLocked(invalidateGeneration: true)
+        }
+        lock.unlock()
+    }
+
     /// Recreate the MOS poster after the shared Accessibility tap has been
     /// created or rebuilt.  Startup config can run before TCC is ready, so the
     /// poster must not be left as a pre-permission display-link session.
@@ -645,6 +661,12 @@ final class AZSSmoothScrollEngine {
                                       value: frame.horizontal)
             event.setDoubleValueField(.scrollWheelEventPointDeltaAxis3,
                                       value: 0.0)
+            // The template is a hardware wheel event captured while the mouse
+            // may also be moving. Mos posts directly to a PID, but AZS posts at
+            // the session boundary; never replay any incidental pointer delta
+            // carried by that template on every momentum frame.
+            event.setIntegerValueField(.mouseEventDeltaX, value: 0)
+            event.setIntegerValueField(.mouseEventDeltaY, value: 0)
             event.setDoubleValueField(.scrollWheelEventIsContinuous, value: 1.0)
             if let phase = frame.phase {
                 event.setDoubleValueField(.scrollWheelEventScrollPhase, value: phase.scroll)

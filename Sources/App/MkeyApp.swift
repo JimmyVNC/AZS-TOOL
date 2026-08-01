@@ -381,7 +381,7 @@ final class MkeyAppDelegate: NSObject, NSApplicationDelegate {
             Task { @MainActor in
                 let state = AppState.shared
                 self.refreshPermissionState()
-                AZSSmoothScrollEngine.shared.resumeAfterWake()
+                AZSSmoothScrollEngine.shared.refreshPostEventAccess()
                 guard state.accessibilityGranted, state.inputMonitoringGranted else {
                     state.eventTapRunning = false
                     return
