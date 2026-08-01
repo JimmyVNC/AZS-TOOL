@@ -10,6 +10,7 @@
 #import <Carbon/Carbon.h>
 #import <Foundation/Foundation.h>
 #include <libproc.h>
+#include <time.h>
 #include "Engine.h"
 #import "MKBridge.h"
 
@@ -28,7 +29,7 @@ extern "C" void MKReEnableEventTap(void); //implemented in MKBridge.mm
 // Swift utility router. It mutates pass-through scroll events in place and
 // returns non-zero when an event (including a smoothly replaced wheel event)
 // must be consumed.
-extern "C" int32_t AZSHandleUtilityEvent(uint32_t typeRaw, void *event);
+extern "C" int32_t AZSHandleUtilityEvent(uint32_t typeRaw, void *event, void *proxy);
 extern "C" int32_t AZSIsSyntheticSmoothScrollEvent(void *event);
 extern "C" void AZSResetSmoothScroll(void);
 
@@ -1006,13 +1007,13 @@ extern "C" {
         // they are not one of our media-key fallbacks. Returning here for every
         // keyDown/keyUp bypasses all Vietnamese composition.
         if (type == kCGEventKeyDown || type == kCGEventKeyUp) {
-            const int32_t consumed = AZSHandleUtilityEvent((uint32_t)type, (void *)event);
+            const int32_t consumed = AZSHandleUtilityEvent((uint32_t)type, (void *)event, (void *)proxy);
             if (consumed) return NULL;
         }
 
         if (type == kCGEventOtherMouseDown || type == kCGEventScrollWheel ||
             type == (CGEventType)NX_SYSDEFINED) {
-            const int32_t consumed = AZSHandleUtilityEvent((uint32_t)type, (void *)event);
+            const int32_t consumed = AZSHandleUtilityEvent((uint32_t)type, (void *)event, (void *)proxy);
             if (!consumed && type == kCGEventScrollWheel &&
                 [[NSUserDefaults standardUserDefaults] boolForKey:@"AZSReverseScrolling"]) {
                 AZSReverseScrollHIDPayload(event);

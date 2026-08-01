@@ -20,6 +20,7 @@
 		3DD90405F11192ABED50DD6D /* AZSDisplayController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8994A48C536F34EB95FEA561 /* AZSDisplayController.swift */; };
 		3E384AA8AFB33B88D81FE2BA /* AZSSmoothScrollEngine.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7405BD21DF7BD3E655D2EB9B /* AZSSmoothScrollEngine.swift */; };
 		45344B2DEE959B702E323F84 /* WelcomePage.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2BB620BF8F406350E961382 /* WelcomePage.swift */; };
+		4883B130F685723CCB93DD44 /* MultitouchSupport.framework in Embed Frameworks */ = {isa = PBXBuildFile; fileRef = 4DEF013F7B4188E9BD9D6710 /* MultitouchSupport.framework */; settings = {ATTRIBUTES = (CodeSignOnCopy, RemoveHeadersOnCopy, ); }; };
 		4D1AD47C43CAA1DB14747C40 /* MKEngineHook.mm in Sources */ = {isa = PBXBuildFile; fileRef = 525FAB5F62867B8F4BDC11BF /* MKEngineHook.mm */; };
 		50A2907EAB4B1D3A3B54E46F /* MkeyApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = FC8EFB3020E8D574B29514CE /* MkeyApp.swift */; };
 		527AA23FD6595B8C9660C125 /* HotkeyEditor.swift in Sources */ = {isa = PBXBuildFile; fileRef = 18F8030F11A0D35B025EE21F /* HotkeyEditor.swift */; };
@@ -59,6 +60,20 @@
 		EF3DB1F8ABD2D624E183B098 /* ConvertTool.cpp in Sources */ = {isa = PBXBuildFile; fileRef = 3700FF514588D508CDBDFF34 /* ConvertTool.cpp */; };
 		F48836BCA516C2092846F6B2 /* GlobalHotKey.swift in Sources */ = {isa = PBXBuildFile; fileRef = 88545EB4D70FC4125976C0CB /* GlobalHotKey.swift */; };
 /* End PBXBuildFile section */
+
+/* Begin PBXCopyFilesBuildPhase section */
+		629A70E86F9AA9BE7A6DDC68 /* Embed Frameworks */ = {
+			isa = PBXCopyFilesBuildPhase;
+			buildActionMask = 2147483647;
+			dstPath = "";
+			dstSubfolderSpec = 10;
+			files = (
+				4883B130F685723CCB93DD44 /* MultitouchSupport.framework in Embed Frameworks */,
+			);
+			name = "Embed Frameworks";
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXCopyFilesBuildPhase section */
 
 /* Begin PBXFileReference section */
 		012E0A8EDCF531FFC5FA815C /* MacroPage.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MacroPage.swift; sourceTree = "<group>"; };
@@ -337,6 +352,7 @@
 				1EAB6FC108A88F85CB90CB58 /* Sources */,
 				387E21F08AC5C2F6F18B749F /* Resources */,
 				644C13239D4355846B5155E9 /* Frameworks */,
+				629A70E86F9AA9BE7A6DDC68 /* Embed Frameworks */,
 				E5E7FE096F27408E55D408FD /* Build SMC Helper */,
 			);
 			buildRules = (

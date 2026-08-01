@@ -6,6 +6,7 @@ struct UtilitiesPage: View {
     @ObservedObject private var displays = AZSDisplayController.shared
     @ObservedObject private var appState = AppState.shared
     @State private var applicationShortcutsExpanded = true
+    @State private var smoothScrollAdvancedExpanded = false
 
     var body: some View {
         Form {
@@ -222,24 +223,55 @@ struct UtilitiesPage: View {
                 Toggle("Cuộn mượt cho con lăn chuột", isOn: $utilities.smoothScrolling)
                 if utilities.smoothScrolling {
                     HStack {
-                        Text("Độ mượt")
-                        Slider(value: $utilities.smoothScrollSmoothness,
-                               in: 0.25...1.0,
-                               step: 0.05)
-                        Text("\(Int((utilities.smoothScrollSmoothness * 100).rounded()))%")
-                            .monospacedDigit()
-                            .foregroundStyle(.secondary)
-                            .frame(width: 42, alignment: .trailing)
-                    }
-                    HStack {
                         Text("Tốc độ")
                         Slider(value: $utilities.smoothScrollSpeed,
-                               in: 0.5...2.0,
+                               in: 0.5...5.0,
                                step: 0.05)
                         Text(String(format: "%.2fx", utilities.smoothScrollSpeed))
                             .monospacedDigit()
                             .foregroundStyle(.secondary)
                             .frame(width: 48, alignment: .trailing)
+                    }
+
+                    DisclosureGroup("Tinh chỉnh nâng cao kiểu Mos", isExpanded: $smoothScrollAdvancedExpanded) {
+                        VStack(spacing: 10) {
+                            HStack {
+                                Text("Step")
+                                Slider(value: $utilities.smoothScrollStep,
+                                       in: 10...80,
+                                       step: 0.5)
+                                Text(String(format: "%.1f px", utilities.smoothScrollStep))
+                                    .monospacedDigit().foregroundStyle(.secondary)
+                                    .frame(width: 58, alignment: .trailing)
+                            }
+                            HStack {
+                                Text("Duration")
+                                Slider(value: $utilities.smoothScrollDuration,
+                                       in: 0.5...5.0,
+                                       step: 0.05)
+                                Text(String(format: "%.2f", utilities.smoothScrollDuration))
+                                    .monospacedDigit().foregroundStyle(.secondary)
+                                    .frame(width: 48, alignment: .trailing)
+                            }
+                            HStack {
+                                Text("Dead Zone")
+                                Slider(value: $utilities.smoothScrollDeadZone,
+                                       in: 0.25...3.0,
+                                       step: 0.05)
+                                Text(String(format: "%.2f px", utilities.smoothScrollDeadZone))
+                                    .monospacedDigit().foregroundStyle(.secondary)
+                                    .frame(width: 58, alignment: .trailing)
+                            }
+                            Toggle("Mô phỏng phase của trackpad", isOn: $utilities.smoothScrollSimulatesTrackpad)
+                            HStack {
+                                Text("Step quyết định quãng đường mỗi nấc; Duration quyết định độ dài quán tính; Dead Zone kết thúc phần đuôi rất nhỏ.")
+                                    .font(.caption).foregroundStyle(.secondary)
+                                Spacer()
+                                Button("Mos chuẩn") { utilities.applyMosSmoothScrollDefaults() }
+                                    .buttonStyle(.borderless)
+                            }
+                        }
+                        .padding(.top, 6)
                     }
                 }
                 Toggle("Đảo chiều cuộn toàn hệ thống", isOn: $utilities.reverseScrolling)

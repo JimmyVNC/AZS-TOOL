@@ -77,6 +77,7 @@ struct AboutPage: View {
                         Text("Tác giả: JimmyVNC · Japser@outlook.com · vncard.site")
                         HStack(spacing: 16) {
                             Link("Mã nguồn OpenKey", destination: URL(string: "https://github.com/tuyenvm/OpenKey")!)
+                            Link("Mos", destination: URL(string: "https://github.com/Caldis/Mos")!)
                             Link("Scroll to Zoom (MIT)", destination: URL(string: "https://github.com/alphaArgon/ScrollToZoom")!)
                             Link("Giấy phép GPL v3", destination: URL(string: "https://www.gnu.org/licenses/gpl-3.0.html")!)
                         }

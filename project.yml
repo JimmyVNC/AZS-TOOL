@@ -60,6 +60,7 @@ targets:
         HEADER_SEARCH_PATHS:
           - "$(SRCROOT)/Sources/Engine"
           - "$(SRCROOT)/Sources/Platform"
+          - "$(SRCROOT)/Sources/Platform/ScrollToZoom"
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         COMBINE_HIDPI_IMAGES: YES
         GCC_WARN_64_TO_32_BIT_CONVERSION: NO
@@ -72,6 +73,8 @@ targets:
       - sdk: IOKit.framework
       - sdk: CoreVideo.framework
       - sdk: CoreDisplay.framework
+      - framework: /System/Library/PrivateFrameworks/MultitouchSupport.framework
+        embed: false
     postBuildScripts:
       - path: scripts/build-smc-helper.sh
         name: Build SMC Helper

@@ -33,7 +33,7 @@ open mkey.xcodeproj
 | Thư mục | Nội dung |
 |---|---|
 | `Sources/Engine` | Engine gõ tiếng Việt C++ (kế thừa OpenKey, **không sửa trừ khi cần**) |
-| `Sources/Platform` | Cầu nối ObjC++: `MKEngineHook.mm` (CGEventTap), `MKBridge` (facade cho Swift) |
+| `Sources/Platform` | Cầu nối ObjC++ và `ScrollToZoom/` (engine C/ObjC được vendor từ source tham khảo) |
 | `Sources/App` | Giao diện SwiftUI: menu bar, cửa sổ cài đặt, `AppState` |
 | `Sources/Support` | Info.plist, entitlements, bridging header, asset icon |
 | `scripts/make_icon.swift` | Sinh app icon từ logo |

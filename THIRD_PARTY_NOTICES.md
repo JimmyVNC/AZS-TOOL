@@ -1,9 +1,19 @@
 # Third-party notices
 
+## Mos
+
+The smooth-scrolling behavior and event-delivery design in AZS Tools reference
+[Mos](https://github.com/Caldis/Mos) by Caldis. AZS Tools uses its own
+implementation integrated into AZS's shared event tap; Mos source files and
+assets are not bundled into this project. Mos is distributed under the
+[CC BY-NC 4.0 license](https://creativecommons.org/licenses/by-nc/4.0/).
+
 ## Scroll to Zoom
 
-The scroll-to-zoom event conversion in AZS Tools is adapted from
-[Scroll to Zoom](https://github.com/alphaArgon/ScrollToZoom).
+AZS Tools vendors the event handling, state manager, settings, process manager,
+and Magic Mouse support modules from
+[Scroll to Zoom](https://github.com/alphaArgon/ScrollToZoom), with a small AZS
+configuration adapter.
 
 MIT License
 

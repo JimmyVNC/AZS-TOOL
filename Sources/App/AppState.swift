@@ -362,8 +362,11 @@ final class AppState: ObservableObject {
         // same user-facing reset operation.
         AZSUtilityController.shared.reverseScrolling = false
         AZSUtilityController.shared.smoothScrolling = true
-        AZSUtilityController.shared.smoothScrollSmoothness = 0.72
-        AZSUtilityController.shared.smoothScrollSpeed = 1.0
+        AZSUtilityController.shared.smoothScrollStep = 33.6
+        AZSUtilityController.shared.smoothScrollSpeed = 2.70
+        AZSUtilityController.shared.smoothScrollDuration = 4.35
+        AZSUtilityController.shared.smoothScrollDeadZone = 1.0
+        AZSUtilityController.shared.smoothScrollSimulatesTrackpad = false
         AZSUtilityController.shared.scrollToZoomEnabled = false
         AZSUtilityController.shared.scrollToZoomModifier = .option
         AZSUtilityController.shared.scrollToZoomSensitivity = 1.0

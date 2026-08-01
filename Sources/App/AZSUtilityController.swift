@@ -491,8 +491,11 @@ final class AZSUtilityController: ObservableObject {
 
     @Published var reverseScrolling: Bool { didSet { saveAndRestart() } }
     @Published var smoothScrolling: Bool { didSet { saveAndRestart() } }
-    @Published var smoothScrollSmoothness: Double { didSet { saveAndRestart() } }
+    @Published var smoothScrollStep: Double { didSet { saveAndRestart() } }
     @Published var smoothScrollSpeed: Double { didSet { saveAndRestart() } }
+    @Published var smoothScrollDuration: Double { didSet { saveAndRestart() } }
+    @Published var smoothScrollDeadZone: Double { didSet { saveAndRestart() } }
+    @Published var smoothScrollSimulatesTrackpad: Bool { didSet { saveAndRestart() } }
     @Published var scrollToZoomEnabled: Bool { didSet { saveAndRestart() } }
     @Published var scrollToZoomModifier: AZSScrollZoomModifier { didSet { saveAndRestart() } }
     @Published var scrollToZoomSensitivity: Double { didSet { saveAndRestart() } }
@@ -525,12 +528,26 @@ final class AZSUtilityController: ObservableObject {
         smoothScrolling = defaults.object(forKey: "AZSSmoothScrolling") == nil
             ? true
             : defaults.bool(forKey: "AZSSmoothScrolling")
-        smoothScrollSmoothness = defaults.object(forKey: "AZSSmoothScrollSmoothness") == nil
-            ? 0.72
-            : defaults.double(forKey: "AZSSmoothScrollSmoothness")
-        smoothScrollSpeed = defaults.object(forKey: "AZSSmoothScrollSpeed") == nil
+        // v3 resets tuning once because the cross-app session poster now uses
+        // the same effective PointDelta payload as standalone Mos. Values from
+        // the older AZS implementation (for example speed 5 / short duration)
+        // are not equivalent and make the corrected engine much too fast.
+        let needsMosTuningMigration = defaults.integer(forKey: "AZSMosTuningVersion") < 3
+        smoothScrollStep = needsMosTuningMigration
+            ? 33.6
+            : (defaults.object(forKey: "AZSSmoothScrollStep") == nil ? 33.6 : defaults.double(forKey: "AZSSmoothScrollStep"))
+        smoothScrollSpeed = needsMosTuningMigration
+            ? 2.70
+            : (defaults.object(forKey: "AZSSmoothScrollSpeed") == nil ? 2.70 : defaults.double(forKey: "AZSSmoothScrollSpeed"))
+        smoothScrollDuration = needsMosTuningMigration
+            ? 4.35
+            : (defaults.object(forKey: "AZSSmoothScrollDuration") == nil ? 4.35 : defaults.double(forKey: "AZSSmoothScrollDuration"))
+        smoothScrollDeadZone = needsMosTuningMigration
             ? 1.0
-            : defaults.double(forKey: "AZSSmoothScrollSpeed")
+            : (defaults.object(forKey: "AZSSmoothScrollDeadZone") == nil ? 1.0 : defaults.double(forKey: "AZSSmoothScrollDeadZone"))
+        smoothScrollSimulatesTrackpad = needsMosTuningMigration
+            ? false
+            : (defaults.object(forKey: "AZSSmoothScrollSimulatesTrackpad") == nil || defaults.bool(forKey: "AZSSmoothScrollSimulatesTrackpad"))
         scrollToZoomEnabled = defaults.bool(forKey: "AZSScrollToZoomEnabled")
         scrollToZoomModifier = AZSScrollZoomModifier(rawValue: defaults.string(forKey: "AZSScrollToZoomModifier") ?? "option") ?? .option
         scrollToZoomSensitivity = defaults.object(forKey: "AZSScrollToZoomSensitivity") == nil
@@ -601,6 +618,7 @@ final class AZSUtilityController: ObservableObject {
         applicationShortcutPaths = appPaths
         lastDetectedButton = nil
         inputMonitoringGranted = CGPreflightListenEventAccess()
+        defaults.set(3, forKey: "AZSMosTuningVersion")
         refreshSnapshot()
         registerActionHotKeys()
     }
@@ -610,8 +628,11 @@ final class AZSUtilityController: ObservableObject {
         // Keeping this method makes startup/wake lifecycle calls idempotent.
         refreshSnapshot()
         AZSSmoothScrollEngine.shared.configure(enabled: smoothScrolling,
-                                                smoothness: smoothScrollSmoothness,
-                                                speed: smoothScrollSpeed)
+                                                step: smoothScrollStep,
+                                                speed: smoothScrollSpeed,
+                                                duration: smoothScrollDuration,
+                                                deadZone: smoothScrollDeadZone,
+                                                simulatesTrackpad: smoothScrollSimulatesTrackpad)
         configureScrollToZoom()
         inputMonitoringGranted = CGPreflightListenEventAccess()
         refreshMouseDevices()
@@ -1061,8 +1082,11 @@ final class AZSUtilityController: ObservableObject {
     private func saveAndRestart() {
         defaults.set(reverseScrolling, forKey: "AZSReverseScrolling")
         defaults.set(smoothScrolling, forKey: "AZSSmoothScrolling")
-        defaults.set(smoothScrollSmoothness, forKey: "AZSSmoothScrollSmoothness")
+        defaults.set(smoothScrollStep, forKey: "AZSSmoothScrollStep")
         defaults.set(smoothScrollSpeed, forKey: "AZSSmoothScrollSpeed")
+        defaults.set(smoothScrollDuration, forKey: "AZSSmoothScrollDuration")
+        defaults.set(smoothScrollDeadZone, forKey: "AZSSmoothScrollDeadZone")
+        defaults.set(smoothScrollSimulatesTrackpad, forKey: "AZSSmoothScrollSimulatesTrackpad")
         defaults.set(scrollToZoomEnabled, forKey: "AZSScrollToZoomEnabled")
         defaults.set(scrollToZoomModifier.rawValue, forKey: "AZSScrollToZoomModifier")
         defaults.set(scrollToZoomSensitivity, forKey: "AZSScrollToZoomSensitivity")
@@ -1078,9 +1102,20 @@ final class AZSUtilityController: ObservableObject {
         defaults.set(savedApplications, forKey: "AZSMouseButtonApplications")
         refreshSnapshot()
         AZSSmoothScrollEngine.shared.configure(enabled: smoothScrolling,
-                                                smoothness: smoothScrollSmoothness,
-                                                speed: smoothScrollSpeed)
+                                                step: smoothScrollStep,
+                                                speed: smoothScrollSpeed,
+                                                duration: smoothScrollDuration,
+                                                deadZone: smoothScrollDeadZone,
+                                                simulatesTrackpad: smoothScrollSimulatesTrackpad)
         configureScrollToZoom()
+    }
+
+    func applyMosSmoothScrollDefaults() {
+        smoothScrollStep = 33.6
+        smoothScrollSpeed = 2.70
+        smoothScrollDuration = 4.35
+        smoothScrollDeadZone = 1.0
+        smoothScrollSimulatesTrackpad = false
     }
 
     private func configureScrollToZoom() {
@@ -1089,6 +1124,25 @@ final class AZSUtilityController: ObservableObject {
                                                 sensitivity: scrollToZoomSensitivity,
                                                 reversed: scrollToZoomReversed,
                                                 usesCommandKeys: scrollToZoomUsesCommandKeys)
+    }
+
+    /// Rebuild the reference event-tap pipeline after Accessibility becomes
+    /// available or AZS recreates its shared tap after wake/failure.
+    func restartScrollToZoom() {
+        AZSScrollToZoomEngine.shared.stop()
+        configureScrollToZoom()
+    }
+
+    /// Rebuild MOS after the shared Accessibility event tap becomes usable.
+    /// The initial utility configuration happens before TCC is granted on a
+    /// first launch, so the poster needs the same explicit restart boundary
+    /// as ScrollToZoom.
+    func restartSmoothScroll() {
+        AZSSmoothScrollEngine.shared.restartAfterEventTap()
+    }
+
+    func stopScrollToZoom() {
+        AZSScrollToZoomEngine.shared.stop()
     }
 
     private func saveActionHotKeys() {
@@ -1150,7 +1204,9 @@ final class AZSUtilityController: ObservableObject {
         lock.unlock()
     }
 
-    fileprivate func handle(_ type: CGEventType, _ event: CGEvent) -> Bool {
+    fileprivate func handle(_ type: CGEventType,
+                            _ event: CGEvent,
+                            tapProxy: UnsafeMutableRawPointer? = nil) -> Bool {
 
         lock.lock()
         let reverse = reverseSnapshot
@@ -1160,9 +1216,8 @@ final class AZSUtilityController: ObservableObject {
         lock.unlock()
 
         if type == .scrollWheel {
-            // Zoom takes ownership before reverse/smooth scrolling so the
-            // physical wheel delta is converted exactly once.
-            if AZSScrollToZoomEngine.shared.process(event) { return true }
+            // ScrollToZoom owns a source-identical hard/soft event-tap
+            // pipeline. This shared AZS tap now handles only reverse/smooth.
             if reverse { reverseScrollEvent(event) }
             // Smooth scrolling owns the complete discrete-wheel gesture. Only
             // consume after the engine confirms that its display-synchronised
@@ -1212,7 +1267,10 @@ final class AZSUtilityController: ObservableObject {
         ]
 
         let deltas = integerAxes.map { event.getIntegerValueField($0.0) }
-        let points = integerAxes.map { event.getIntegerValueField($0.1) }
+        // Mos's ScrollEvent.reverse preserves PointDeltaAxis as a floating
+        // value. Reading it through the integer accessor truncates high-
+        // resolution wheel input to zero and leaves MOS with no usable delta.
+        let points = integerAxes.map { event.getDoubleValueField($0.1) }
         let fixed = fixedAxes.map { event.getDoubleValueField($0) }
 
         for (index, fields) in integerAxes.enumerated() {
@@ -1222,7 +1280,7 @@ final class AZSUtilityController: ObservableObject {
             event.setDoubleValueField(field, value: -fixed[index])
         }
         for (index, fields) in integerAxes.enumerated() {
-            event.setIntegerValueField(fields.1, value: -points[index])
+            event.setDoubleValueField(fields.1, value: -points[index])
         }
     }
 
@@ -1448,10 +1506,12 @@ final class AZSUtilityController: ObservableObject {
 /// opaque pointer keeps the Swift/Objective-C++ boundary stable and avoids a
 /// second event tap that may be denied by macOS.
 @_cdecl("AZSHandleUtilityEvent")
-func AZSHandleUtilityEvent(_ typeRaw: UInt32, _ eventPointer: UnsafeMutableRawPointer?) -> Int32 {
+func AZSHandleUtilityEvent(_ typeRaw: UInt32,
+                           _ eventPointer: UnsafeMutableRawPointer?,
+                           _ tapProxy: UnsafeMutableRawPointer?) -> Int32 {
     guard let eventPointer, let type = CGEventType(rawValue: typeRaw) else { return 0 }
     let event = Unmanaged<CGEvent>.fromOpaque(eventPointer).takeUnretainedValue()
-    return AZSUtilityController.shared.handle(type, event) ? 1 : 0
+    return AZSUtilityController.shared.handle(type, event, tapProxy: tapProxy) ? 1 : 0
 }
 
 private let azsSystemDefinedType = CGEventType(rawValue: 14)!

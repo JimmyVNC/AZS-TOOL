@@ -31,7 +31,8 @@ mkey/
     ├── Platform/            # glue ObjC++: event tap, bridge engine ↔ Swift
     │   ├── MKGlobals.h      # khai báo biến cấu hình cho Swift
     │   ├── MKBridge.h/.mm   # facade: tap lifecycle, macro, chuyển mã
-    │   └── MKEngineHook.mm  # CGEventTap callback + key synthesis
+    │   ├── MKEngineHook.mm  # CGEventTap callback + key synthesis
+    │   └── ScrollToZoom/    # các module C/ObjC gốc + adapter AZS mỏng
     ├── App/                 # SwiftUI: MenuBarExtra, Settings, AppState
     └── Support/             # Info.plist, entitlements, bridging header, assets
 ```
@@ -71,3 +72,8 @@ Phần định tuyến sự kiện và lượng tử delta của **Smooth Scroll
 khai lại với tham khảo từ [Mac Mouse Fix](https://github.com/noah-nuebling/mac-mouse-fix)
 (© Noah Nuebling, MMF License); đường cong chuyển động tham khảo
 [Mos](https://github.com/Caldis/Mos) của Caldis.
+
+**Scroll to Zoom** dùng trực tiếp cấu trúc module của
+[ScrollToZoom](https://github.com/alphaArgon/ScrollToZoom): hard/soft event taps,
+state manager, settings, process manager và Magic Mouse support. Swift chỉ đưa
+thiết lập của giao diện AZS vào adapter, không tự mô phỏng state machine.

@@ -227,6 +227,7 @@ final class MkeyAppDelegate: NSObject, NSApplicationDelegate {
     private var permissionTimer: Timer?
     private var eventTapHealthTimer: Timer?
     private var didRequestInputMonitoring = false
+    private var didRequestPostEventAccess = false
 
     func applicationWillFinishLaunching(_ notification: Notification) {
         AppState.registerDefaultSettings()
@@ -300,6 +301,7 @@ final class MkeyAppDelegate: NSObject, NSApplicationDelegate {
     func applicationWillTerminate(_ notification: Notification) {
         permissionTimer?.invalidate()
         eventTapHealthTimer?.invalidate()
+        AZSUtilityController.shared.stopScrollToZoom()
         _ = MKBridge.stopEventTap()
         AZSSmoothScrollEngine.shared.prepareForSleep()
         AZSPrivilegedSMC.shutdown()
@@ -350,6 +352,21 @@ final class MkeyAppDelegate: NSObject, NSApplicationDelegate {
         // Starting or rebuilding the global tap must always begin in the normal
         // typing state, even if a window was interrupted during an app update.
         MKBridge.setEngineSuspended(false)
+        // Smooth scrolling replaces each physical wheel event. Ask for the
+        // synthesizing grant once, after Accessibility and the shared tap are
+        // known-good. Until it is granted, MOS deliberately passes native
+        // wheel events through instead of swallowing them.
+        if !CGPreflightPostEventAccess(), !didRequestPostEventAccess {
+            didRequestPostEventAccess = true
+            _ = CGRequestPostEventAccess()
+        }
+        // ScrollToZoom may have attempted setup before TCC permissions were
+        // granted. Start it only after the known-good AZS tap exists, matching
+        // the reference source's event-tap ordering requirements.
+        AZSUtilityController.shared.restartScrollToZoom()
+        // MOS's ScrollPoster follows the same boundary: its display link and
+        // captured-event session must be rebuilt after the shared tap exists.
+        AZSUtilityController.shared.restartSmoothScroll()
         AppState.shared.eventTapRunning = true
     }
 
@@ -374,6 +391,8 @@ final class MkeyAppDelegate: NSObject, NSApplicationDelegate {
                     _ = MKBridge.stopEventTap()
                     if MKBridge.startEventTap() {
                         MKBridge.setEngineSuspended(false)
+                        AZSUtilityController.shared.restartScrollToZoom()
+                        AZSUtilityController.shared.restartSmoothScroll()
                         state.eventTapRunning = true
                     } else {
                         state.eventTapRunning = false
@@ -510,6 +529,7 @@ final class MkeyAppDelegate: NSObject, NSApplicationDelegate {
 
     @objc private func receiveSleep(_ note: Notification) {
         AZSSmoothScrollEngine.shared.prepareForSleep()
+        AZSUtilityController.shared.stopScrollToZoom()
         _ = MKBridge.stopEventTap()
         AppState.shared.eventTapRunning = false
     }

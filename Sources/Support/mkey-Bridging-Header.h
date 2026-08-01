@@ -6,6 +6,7 @@
 #import "MKGlobals.h"
 #import "MKBridge.h"
 #import "AZSSMC.h"
+#import "ScrollToZoom/AZSScrollToZoomBridge.h"
 #import <Foundation/Foundation.h>
 #import <IOKit/i2c/IOI2CInterface.h>
 #import <CoreGraphics/CoreGraphics.h>

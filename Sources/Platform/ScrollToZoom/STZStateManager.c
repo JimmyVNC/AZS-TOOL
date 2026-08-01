@@ -1,0 +1,1001 @@
+/*
+ *  STZStateManager.c
+ *  ScrollToZoom
+ *
+ *  Created by alpha on 2026/5/28.
+ *  Copyright © 2026 alphaArgon.
+ */
+
+#include "STZStateManager.h"
+#include "STZSettings.h"
+#include "CGEventSPI.h"
+
+
+typedef struct {
+    CGEventRef          otherEvent;
+    STZEventPlacement   otherPlacement;
+} EventResult;
+
+
+static inline EventResult discardEvent(void) {
+    return (EventResult){NULL, kSTZReplaceEvent};
+}
+
+static inline EventResult keepEvent(void) {
+    return (EventResult){NULL, kSTZAppendEvent};
+}
+
+static inline EventResult replaceEvent(CGEventRef event) {
+    return (EventResult){event, kSTZReplaceEvent};
+}
+
+static inline EventResult appendEvent(CGEventRef event) {
+    return (EventResult){event, kSTZAppendEvent};
+}
+
+static inline EventResult prependEvent(CGEventRef event) {
+    return (EventResult){event, kSTZPrependEvent};
+}
+
+
+static const CGEventTimestamp kCGEventDistantFuture = UINT64_MAX;
+
+
+//  FIXME: We should find a more appropriate way to store the direction.
+//  Mos has been using `kCGEventSourceUserData` since around March 2026. If we set this field,
+//  scroll events could be completely discarded by Mos! I think it’s a bad idea from Claude.
+//  The alternative field is noted as “not used” in the documentation. It should be a 16.16
+//  fixed-point value if it follows the same convention as other axes. In case this field is
+//  actually used, the payloads below are very small and should not have a significant impact.
+//  Currently, no code on GitHub utilizes this field.
+static int32_t const kSignumField      = kCGScrollWheelEventFixedPtDeltaAxis3;
+static int64_t const kPositiveSignum   = 5722;
+static int64_t const kNegativeSignum   = 5721;
+static int64_t const kZeroSignum       = 5720;
+
+
+static bool isScrollFlipped(CGEventRef event) {
+    return CGEventGetIntegerValueField(event, kCGScrollEventIsDirectionInverted) != 0;
+}
+
+
+static double primaryScrollDelta(CGEventRef event) {
+    double data = CGEventGetIntegerValueField(event, kCGScrollWheelEventPointDeltaAxis1);
+    if (data == 0) {
+        data = CGEventGetDoubleValueField(event, kCGScrollWheelEventFixedPtDeltaAxis1);
+    }
+    return data;
+}
+
+
+uint64_t STZStashScrollDirectionIntoEvent(CGEventRef event) {
+    uint64_t payload = CGEventGetIntegerValueField(event, kSignumField);
+    if (payload != 0) {return payload;}
+
+    double delta = primaryScrollDelta(event) * (isScrollFlipped(event) ? -1 : 1);
+    payload = (delta > 0) ? kPositiveSignum : (delta < 0) ? kNegativeSignum : kZeroSignum;
+    CGEventSetIntegerValueField(event, kSignumField, payload);
+    return payload;
+}
+
+
+double STZReadScrollDeltaFromEvent(CGEventRef event, uint64_t fallback, bool unstash) {
+    switch (CGEventGetIntegerValueField(event, kSignumField)) {
+    case kPositiveSignum:
+        if (unstash) {
+            CGEventSetIntegerValueField(event, kSignumField, 0);
+        }
+        return fabs(primaryScrollDelta(event));
+    case kNegativeSignum:
+        if (unstash) {
+            CGEventSetIntegerValueField(event, kSignumField, 0);
+        }
+        return -fabs(primaryScrollDelta(event));
+    case kZeroSignum:
+        if (unstash) {
+            CGEventSetIntegerValueField(event, kSignumField, 0);
+        }
+        return 0;
+    default:
+        break;
+    }
+
+    switch (fallback) {
+    case kPositiveSignum:
+        return fabs(primaryScrollDelta(event));
+    case kNegativeSignum:
+        return -fabs(primaryScrollDelta(event));
+    case kZeroSignum:
+        return 0;
+    default:
+        return primaryScrollDelta(event) * (isScrollFlipped(event) ? -1 : 1);
+    }
+}
+
+
+//  MARK: -
+
+
+typedef enum {
+    kDiscretelyScrolled,
+    kContinuousScrollMayBegin,
+    kContinuousScrollBegan,
+    kContinuousScrollChanged,
+    kContinuousScrollEnded,
+    kContinuousScrollCancelled,
+    kMomentumScrollBegan,
+    kMomentumScrollChanged,
+    kMomentumScrollEnded,
+} ScrollType;
+
+
+static ScrollType scrollOf(CGEventRef event);
+static void setScrollOf(CGEventRef event, ScrollType scroll);
+static CGEventRef createZoomEvent(CGEventRef event, CGGesturePhase phase, CGPoint center, double value);
+
+
+typedef enum {
+    kStateNotInSession,
+
+    kStateScrollMayBegin,
+    kStateScrollInProgress,
+    kStateMomentumScrollInProgress,
+
+    kStateZoomInProgress,
+    kStateZoomToEndAfterWaiting,  ///< Same as InProgress, but emits an additional end event if idle.
+    kStateZoomStoppedByAttenuation,  ///< Same as NotInSession, but discards momentum scrolls until session ends.
+
+} StateType;
+
+static int stateCategory(StateType type) {
+    if (type == kStateNotInSession) {return 0;}
+    if (type <= kStateMomentumScrollInProgress) {return 1;}
+    if (type <= kStateZoomStoppedByAttenuation) {return 2;}
+    __builtin_unreachable();
+}
+
+
+struct _STZState {
+    StateType           type;
+    bool                needsFixScroll;
+
+    //  If `refEvent` as well as `delayedZoom` is set, a zoom event of this value will be emitted
+    //  before the delayed zoom is emitted; otherwise this value serves only as a memo.
+    double              chromiumZoomShim;
+
+    double              delayedZoom;
+    CGEventRef          refEvent;
+    CGEventTimestamp    refTime;
+    CGEventTimestamp    endTimeout;
+    CGEventTimestamp    momentumStart;
+    CGPoint             zoomCenter;
+    uint64_t            sessionData;
+
+    //  The speedometer is for measuring discrete scroll intervals and requires no high accuracy.
+    //  When a bunch of discrete scroll events occur in a short period of time, the timeout for
+    // `ZoomToEndAfterWaiting` will shorten.
+#define kSpeedometerCapacity 8
+    int                 speedometerNextIndex;
+    CGEventTimestamp    speedometerLastTime;
+    CGEventTimestamp    speedometerIntervals[kSpeedometerCapacity];
+};
+
+typedef struct {
+    CGEventRef event;
+    ScrollType scroll;
+    STZGestureType gesture;
+    bool fixChromiumZoomStall;
+    uint64_t fallbackScrollDir;
+} _StateTransitionContext;
+
+
+static const CGEventTimestamp kEventDelayDuration = (int64_t)(0.01667 * NSEC_PER_SEC);
+static const CGEventTimestamp kMomentumScrollTimeout = (int64_t)(0.05 * NSEC_PER_SEC);
+static const CGEventTimestamp kMaxDiscreteScrollTimeout = (int64_t)(0.35 * NSEC_PER_SEC);
+static const CGEventTimestamp kAutoDiscreteScrollTimeout = kCGEventDistantFuture;
+
+
+static EventResult updateStateNotInSession(STZStateRef state, _StateTransitionContext *c);
+static EventResult updateStateScrollMayBegin(STZStateRef state, _StateTransitionContext *c);
+static EventResult updateStateScrollInProgress(STZStateRef state, _StateTransitionContext *c);
+static EventResult updateStateMomentumScrollInProgress(STZStateRef state, _StateTransitionContext *c);
+static EventResult updateStateZoomInProgress(STZStateRef state, _StateTransitionContext *c);
+
+
+static void setZoomToEndAfterWaiting(STZStateRef state, CGEventRef event, CGEventTimestamp timeout) {
+    CGEventTimestamp now = CGEventTimestampNow();
+
+    if (timeout == kAutoDiscreteScrollTimeout) {
+        int index = state->speedometerNextIndex;
+        state->speedometerIntervals[index] = now - state->speedometerLastTime;
+        state->speedometerNextIndex = (index + 1) % kSpeedometerCapacity;
+        state->speedometerLastTime = now;
+
+        timeout = kEventDelayDuration;
+        for (int i = 0; i < kSpeedometerCapacity; ++i) {
+            if (timeout < state->speedometerIntervals[i]) {
+                timeout = state->speedometerIntervals[i];
+            }
+        }
+        timeout = timeout / 2 * 3;
+        if (timeout > kMaxDiscreteScrollTimeout) {
+            timeout = kMaxDiscreteScrollTimeout;
+        }
+    }
+
+    state->type = kStateZoomToEndAfterWaiting;
+    state->refEvent = CGEventCreateCopy(event);
+    //  This value is not read from the event because Mos may not report it accurately.
+    state->refTime = now;
+    state->endTimeout = timeout;
+}
+
+
+static void discardRefEvent(STZStateRef state) {
+    if (state->refEvent == NULL) {return;}
+    CFRelease(state->refEvent);
+    state->refEvent = NULL;
+}
+
+
+static void checkMomentumStart(STZStateRef state, CGEventRef event, ScrollType scroll) {
+    if (scroll == kMomentumScrollBegan) {
+        state->momentumStart = CGEventGetTimestamp(event);
+    } else if (scroll < kMomentumScrollBegan) {
+        state->momentumStart = kCGEventDistantFuture;
+    }
+}
+
+
+STZStateRef STZStateCreate(void){
+    STZStateRef state = malloc(sizeof(*state));
+    state->type = kStateNotInSession;
+    state->needsFixScroll = false;
+    state->chromiumZoomShim = 0;
+    state->delayedZoom = 0;
+    state->refEvent = NULL;
+    state->momentumStart = kCGEventDistantFuture;
+    state->sessionData = 0;
+
+    state->speedometerNextIndex = 0;
+    state->speedometerLastTime = 0;
+    for (int i = 0; i < kSpeedometerCapacity; ++i) {
+        state->speedometerIntervals[i] = kMaxDiscreteScrollTimeout;
+    }
+
+    return state;
+}
+
+
+void STZStateRelease(STZStateRef state) {
+    discardRefEvent(state);
+    free(state);
+}
+
+
+bool STZStateIsZooming(STZStateRef state) {
+    //  `kStateZoomStoppedByAttenuation` is still zooming; it just discard events.
+    return state->type >= kStateZoomInProgress && state->type <= kStateZoomStoppedByAttenuation;
+}
+
+
+bool STZStateGetSessionData(STZStateRef state, uint64_t *outData) {
+    if (state->type == kStateNotInSession) {
+        if (outData) {*outData = 0;}
+        return false;
+    } else {
+        if (outData) {*outData = state->sessionData;}
+        return true;
+    }
+}
+
+
+void STZStateReadScrollEvent(STZStateRef state, CGEventRef event) {
+    discardRefEvent(state);
+    state->needsFixScroll = false;
+
+    StateType oldType = state->type;
+
+    ScrollType scroll = scrollOf(event);
+    checkMomentumStart(state, event, scroll);
+
+    switch (scroll) {
+    case kDiscretelyScrolled:
+        state->type = kStateNotInSession;
+        break;
+    case kContinuousScrollMayBegin:
+        state->type = kStateScrollMayBegin;
+        break;
+    case kContinuousScrollBegan:
+    case kContinuousScrollChanged:
+        state->type = kStateScrollInProgress;
+        break;
+    case kContinuousScrollEnded:
+    case kContinuousScrollCancelled:
+        state->type = kStateNotInSession;
+        break;
+    case kMomentumScrollBegan:
+    case kMomentumScrollChanged:
+        state->type = kStateMomentumScrollInProgress;
+        break;
+    case kMomentumScrollEnded:
+        state->type = kStateNotInSession;
+        break;
+    }
+
+    StateType newType = state->type;
+    if (newType == kStateNotInSession || stateCategory(newType) != stateCategory(oldType)) {
+        state->sessionData = 0;
+    }
+}
+
+
+CGEventRef STZStateTransformScrollEvent(STZStateRef state, CGEventRef event, STZGestureType gesture,
+                                        bool fixChromiumZoomStall,
+                                        uint64_t fallbackScrollDir, uint64_t const *sessionData,
+                                        STZEventPlacement *returnEventPlacement) {
+    ScrollType scroll = scrollOf(event);
+    if (gesture == kSTZZoom && scroll == kDiscretelyScrolled && STZIsScrollEventNoOp(event)) {
+        //  Some versions of Mos emit endless trailing scroll events with zero deltas until the
+        //  left mouse button is down. In any case, such discrete scrolls are bizarre.
+        //  Discard the event so that the session will terminate due to timeout.
+        *returnEventPlacement = kSTZReplaceEvent;
+        return NULL;
+    }
+
+    discardRefEvent(state);
+    state->needsFixScroll = false;
+
+    StateType oldType = state->type;
+    if (gesture == kSTZZoom && oldType < kStateZoomInProgress) {
+        state->zoomCenter = CGEventGetLocation(event);
+    }
+
+    checkMomentumStart(state, event, scroll);
+
+    _StateTransitionContext c = {
+        .event = event,
+        .scroll = scroll,
+        .gesture = gesture,
+        .fixChromiumZoomStall = fixChromiumZoomStall,
+        .fallbackScrollDir = fallbackScrollDir,
+    };
+
+    EventResult result;
+    switch (oldType) {
+    case kStateNotInSession:
+        result = updateStateNotInSession(state, &c);
+        break;
+    case kStateScrollMayBegin:
+        result = updateStateScrollMayBegin(state, &c);
+        break;
+    case kStateScrollInProgress:
+        result = updateStateScrollInProgress(state, &c);
+        break;
+    case kStateMomentumScrollInProgress:
+        result = updateStateMomentumScrollInProgress(state, &c);
+        break;
+    case kStateZoomInProgress:
+    case kStateZoomToEndAfterWaiting:
+        result = updateStateZoomInProgress(state, &c);
+        break;
+    case kStateZoomStoppedByAttenuation:
+        if (scroll == kMomentumScrollChanged) {
+            result = discardEvent();
+        } else if (scroll == kMomentumScrollEnded) {
+            state->type = kStateNotInSession;
+            result = discardEvent();
+        } else {
+            state->type = kStateNotInSession;
+            result = updateStateNotInSession(state, &c);
+        }
+        break;
+    }
+
+    StateType newType = state->type;
+    if (newType == kStateNotInSession) {
+        state->sessionData = 0;
+    } else if (sessionData != NULL) {
+        state->sessionData = *sessionData;
+    } else if (stateCategory(newType) != stateCategory(oldType)) {
+        state->sessionData = 0;
+    }
+
+    assert((state->refEvent != NULL) == (state->type == kStateZoomToEndAfterWaiting));
+    assert((state->refEvent != NULL) || (state->delayedZoom == 0));
+
+    *returnEventPlacement = result.otherPlacement;
+    return result.otherEvent;
+}
+
+
+CGEventRef STZStateRevertToScrollByEvent(STZStateRef state, CGEventRef event) {
+    switch (state->type) {
+    case kStateNotInSession:
+    case kStateScrollMayBegin:
+    case kStateScrollInProgress:
+    case kStateMomentumScrollInProgress:
+        return NULL;
+
+    case kStateZoomInProgress:
+    case kStateZoomToEndAfterWaiting:
+        discardRefEvent(state);
+        state->needsFixScroll = true;
+        state->type = kStateNotInSession;
+        state->delayedZoom = 0;
+        state->chromiumZoomShim = 0;
+        state->sessionData = 0;
+        return createZoomEvent(event, kCGGesturePhaseEnded, state->zoomCenter, 0);
+
+    case kStateZoomStoppedByAttenuation:
+        state->needsFixScroll = true;
+        state->sessionData = 0;
+        state->type = kStateNotInSession;
+        return NULL;
+    }
+}
+
+
+CGEventRef STZStatePeriodicallyUpdate(STZStateRef state, CGEventTimestamp now) {
+    if (state->type != kStateZoomToEndAfterWaiting) {return NULL;}
+
+    CGEventTimestamp elapsed = now - state->refTime;
+    if (state->refEvent && state->chromiumZoomShim != 0 && elapsed >= kEventDelayDuration / 2) {
+        CGEventRef event = createZoomEvent(state->refEvent, kCGGesturePhaseChanged, state->zoomCenter, state->chromiumZoomShim);
+        CGEventSetTimestamp(event, now);
+        state->chromiumZoomShim = 0;
+        return event;
+    }
+
+    if (state->delayedZoom != 0 && elapsed >= kEventDelayDuration) {
+        CGEventRef event = createZoomEvent(state->refEvent, kCGGesturePhaseChanged, state->zoomCenter, state->delayedZoom);
+        CGEventSetTimestamp(event, now);
+        state->delayedZoom = 0;
+        return event;
+    }
+
+    if (elapsed >= state->endTimeout) {
+        CGEventRef event = createZoomEvent(state->refEvent, kCGGesturePhaseEnded, state->zoomCenter, 0);
+        CGEventSetTimestamp(event, now);
+        discardRefEvent(state);
+        state->sessionData = 0;
+        state->type = kStateNotInSession;
+        return event;
+    }
+
+    return NULL;
+}
+
+
+CGEventTimestamp STZStateGetNextUpdatePeriod(STZStateRef state, CGEventTimestamp now) {
+    if (state->type != kStateZoomToEndAfterWaiting) {return 0;}
+
+    CGEventTimestamp fireAt = state->refTime;
+    if (state->refEvent && state->chromiumZoomShim != 0) {
+        fireAt += kEventDelayDuration / 2;
+    } else if (state->delayedZoom != 0) {
+        fireAt += kEventDelayDuration;
+    } else {
+        fireAt += state->endTimeout;
+    }
+
+    if (fireAt <= now) {return 1;}
+    return fireAt - now;
+}
+
+
+bool STZStateCanStopTransformingEvents(STZStateRef state) {
+    switch (state->type) {
+    case kStateNotInSession:
+    case kStateScrollMayBegin:
+    case kStateScrollInProgress:
+    case kStateMomentumScrollInProgress:
+        return !state->needsFixScroll;
+    case kStateZoomInProgress:
+    case kStateZoomToEndAfterWaiting:
+    case kStateZoomStoppedByAttenuation:
+        return false;
+    }
+}
+
+
+//  MARK: - State Transition Routes
+
+
+static double magnificationFromScroll(CGEventRef event, uint64_t fallbackScrollDir, CGEventTimestamp momentumStart) {
+    double value = STZReadScrollDeltaFromEvent(event, fallbackScrollDir, false) * STZGetMagnificationScalar();
+
+    CGEventTimestamp now = CGEventGetTimestamp(event);
+    if (now >= momentumStart) {
+        double k = 1 - STZGetMomentumZoomAttenuation();
+        double dt = (double)(now - momentumStart) / NSEC_PER_SEC;
+        value *= k != 0 ? pow(k, dt / k) : 0;
+
+        if (fabs(value) < STZGetMomentumZoomMinValue()) {
+            value = 0;
+        }
+    }
+
+    return value;
+}
+
+
+static double magnificationToFixChromiumZoom(double magnification) {
+    //  This zoom strategy has been used since 2015 and appears to be very stable. See:
+    //  https://github.com/chromium/chromium/blob/0a8c2754afbae766a5db45ead34d0154e8b03997/content/browser/renderer_host/render_widget_host_view_mac.mm#L2425
+    return magnification > 0 ? 0.4999 : -0.3329;
+}
+
+
+static EventResult beginZoomingByDiscreteScroll(STZStateRef state, _StateTransitionContext *c, int terminatingScroll) {
+    double value = magnificationFromScroll(c->event, c->fallbackScrollDir, kCGEventDistantFuture);
+    if (c->fixChromiumZoomStall) {
+        state->chromiumZoomShim = magnificationToFixChromiumZoom(value);
+    }
+    setZoomToEndAfterWaiting(state, c->event, kAutoDiscreteScrollTimeout);
+    state->delayedZoom += value;
+
+    if (terminatingScroll >= 0) {
+        setScrollOf(c->event, (ScrollType)terminatingScroll);
+        return appendEvent(createZoomEvent(c->event, kCGGesturePhaseBegan, state->zoomCenter, 0));
+    } else {
+        return replaceEvent(createZoomEvent(c->event, kCGGesturePhaseBegan, state->zoomCenter, 0));
+    }
+}
+
+static EventResult beginZoomingByNonDiscreteScroll(STZStateRef state, _StateTransitionContext *c, int terminatingScroll, CGEventTimestamp momentumStart) {
+    double value = magnificationFromScroll(c->event, c->fallbackScrollDir, momentumStart);
+    if (c->fixChromiumZoomStall) {
+        state->chromiumZoomShim = magnificationToFixChromiumZoom(value);
+        value = 0;  //  Dropping one or two continuous scrolls is OK because they are
+        // either very dense or have very small deltas. The same applies below.
+    }
+
+    state->type = kStateZoomInProgress;
+    if (terminatingScroll != -1) {
+        setScrollOf(c->event, (ScrollType)terminatingScroll);
+        return appendEvent(createZoomEvent(c->event, kCGGesturePhaseBegan, state->zoomCenter, value));
+    } else {
+        return replaceEvent(createZoomEvent(c->event, kCGGesturePhaseBegan, state->zoomCenter, value));
+    }
+}
+
+
+static EventResult updateStateNotInSession(STZStateRef state, _StateTransitionContext *c) {
+    switch (c->scroll) {
+    case kDiscretelyScrolled:
+        switch (c->gesture) {
+        case kSTZScroll:
+            return keepEvent();
+
+        case kSTZZoom:
+            return beginZoomingByDiscreteScroll(state, c, -1);
+        }
+
+    case kContinuousScrollMayBegin:
+        switch (c->gesture) {
+        case kSTZScroll:
+            state->type = kStateScrollMayBegin;
+            return keepEvent();
+
+        case kSTZZoom:
+            return discardEvent();
+        }
+
+    case kContinuousScrollBegan:
+    case kContinuousScrollChanged:
+        switch (c->gesture) {
+        case kSTZScroll:
+            setScrollOf(c->event, kContinuousScrollBegan);
+            state->type = kStateScrollInProgress;
+            return keepEvent();
+
+        case kSTZZoom:
+            return beginZoomingByNonDiscreteScroll(state, c, -1, kCGEventDistantFuture);
+        }
+
+    case kContinuousScrollEnded:
+    case kContinuousScrollCancelled:
+        return discardEvent();
+
+    case kMomentumScrollBegan:
+    case kMomentumScrollChanged:
+        switch (c->gesture) {
+        case kSTZScroll:
+            setScrollOf(c->event, kMomentumScrollBegan);
+            state->type = kStateMomentumScrollInProgress;
+            return keepEvent();
+
+        case kSTZZoom:
+            return beginZoomingByNonDiscreteScroll(state, c, -1, state->momentumStart);
+        }
+
+    case kMomentumScrollEnded:
+        return discardEvent();
+    }
+}
+
+
+static EventResult updateStateScrollMayBegin(STZStateRef state, _StateTransitionContext *c) {
+    switch (c->scroll) {
+    case kDiscretelyScrolled:
+        switch (c->gesture) {
+        case kSTZScroll:
+            setScrollOf(c->event, kContinuousScrollCancelled);
+            state->type = kStateNotInSession;
+            return keepEvent();
+
+        case kSTZZoom:
+            return beginZoomingByDiscreteScroll(state, c, kContinuousScrollCancelled);
+        }
+
+    case kContinuousScrollMayBegin:
+        return discardEvent();
+
+    case kContinuousScrollBegan:
+    case kContinuousScrollChanged:
+        switch (c->gesture) {
+        case kSTZScroll:
+            setScrollOf(c->event, kContinuousScrollBegan);
+            state->type = kStateScrollInProgress;
+            return keepEvent();
+
+        case kSTZZoom:
+            return beginZoomingByNonDiscreteScroll(state, c, kContinuousScrollCancelled, kCGEventDistantFuture);
+        }
+
+    case kContinuousScrollEnded:
+    case kContinuousScrollCancelled:
+        state->type = kStateNotInSession;
+        return keepEvent();
+
+    case kMomentumScrollBegan:
+    case kMomentumScrollChanged:
+        switch (c->gesture) {
+        case kSTZScroll:
+            //  Begin momentum scroll on the next event.
+            state->needsFixScroll = true;
+            setScrollOf(c->event, kContinuousScrollCancelled);
+            state->type = kStateNotInSession;
+            return keepEvent();
+
+        case kSTZZoom:
+            return beginZoomingByNonDiscreteScroll(state, c, kContinuousScrollCancelled, state->momentumStart);
+        }
+
+    case kMomentumScrollEnded:
+        setScrollOf(c->event, kContinuousScrollCancelled);
+        state->type = kStateNotInSession;
+        return keepEvent();
+    }
+}
+
+
+static EventResult updateStateScrollInProgress(STZStateRef state, _StateTransitionContext *c) {
+    switch (c->scroll) {
+    case kDiscretelyScrolled:
+        switch (c->gesture) {
+        case kSTZScroll:
+            setScrollOf(c->event, kContinuousScrollEnded);
+            state->type = kStateNotInSession;
+            return keepEvent();
+
+        case kSTZZoom:
+            return beginZoomingByDiscreteScroll(state, c, kContinuousScrollEnded);
+        }
+
+    case kContinuousScrollMayBegin:
+        return discardEvent();
+
+    case kContinuousScrollBegan:
+    case kContinuousScrollChanged:
+        switch (c->gesture) {
+        case kSTZScroll:
+            setScrollOf(c->event, kContinuousScrollChanged);
+            state->type = kStateScrollInProgress;
+            return keepEvent();
+
+        case kSTZZoom:
+            return beginZoomingByNonDiscreteScroll(state, c, kContinuousScrollEnded, kCGEventDistantFuture);
+        }
+
+    case kContinuousScrollEnded:
+    case kContinuousScrollCancelled:
+        state->type = kStateNotInSession;
+        return keepEvent();
+
+    case kMomentumScrollBegan:
+    case kMomentumScrollChanged:
+        switch (c->gesture) {
+        case kSTZScroll:
+            //  Begin momentum scroll on the next event.
+            state->needsFixScroll = true;
+            setScrollOf(c->event, kContinuousScrollEnded);
+            state->type = kStateNotInSession;
+            return keepEvent();
+
+        case kSTZZoom:
+            return beginZoomingByNonDiscreteScroll(state, c, kContinuousScrollEnded, state->momentumStart);
+        }
+
+    case kMomentumScrollEnded:
+        setScrollOf(c->event, kContinuousScrollEnded);
+        state->type = kStateNotInSession;
+        return keepEvent();
+    }
+}
+
+
+static EventResult updateStateMomentumScrollInProgress(STZStateRef state, _StateTransitionContext *c) {
+    switch (c->scroll) {
+    case kDiscretelyScrolled:
+        switch (c->gesture) {
+        case kSTZScroll:
+            setScrollOf(c->event, kMomentumScrollEnded);
+            state->type = kStateNotInSession;
+            return keepEvent();
+
+        case kSTZZoom:
+            return beginZoomingByDiscreteScroll(state, c, kMomentumScrollEnded);
+        }
+
+    case kContinuousScrollMayBegin:
+        return discardEvent();
+
+    case kContinuousScrollBegan:
+    case kContinuousScrollChanged:
+        switch (c->gesture) {
+        case kSTZScroll:
+            //  Begin continuous scroll on the next event.
+            state->needsFixScroll = true;
+            setScrollOf(c->event, kMomentumScrollEnded);
+            state->type = kStateNotInSession;
+            return keepEvent();
+
+        case kSTZZoom:
+            return beginZoomingByNonDiscreteScroll(state, c, kMomentumScrollEnded, kCGEventDistantFuture);
+        }
+
+    case kContinuousScrollEnded:
+    case kContinuousScrollCancelled:
+        setScrollOf(c->event, kMomentumScrollEnded);
+        state->type = kStateNotInSession;
+        return keepEvent();
+
+    case kMomentumScrollBegan:
+    case kMomentumScrollChanged:
+        switch (c->gesture) {
+        case kSTZScroll:
+            setScrollOf(c->event, kMomentumScrollChanged);
+            state->type = kStateMomentumScrollInProgress;
+            return keepEvent();
+
+        case kSTZZoom:
+            return beginZoomingByNonDiscreteScroll(state, c, kMomentumScrollEnded, state->momentumStart);
+        }
+
+    case kMomentumScrollEnded:
+        state->type = kStateNotInSession;
+        return keepEvent();
+    }
+}
+
+
+static EventResult updateStateZoomInProgress(STZStateRef state, _StateTransitionContext *c) {
+    double value;
+    double chromiumShim = state->chromiumZoomShim;
+    double pending = state->delayedZoom;
+    state->chromiumZoomShim = 0;
+    state->delayedZoom = 0;
+
+    switch (c->scroll) {
+    case kDiscretelyScrolled:
+        switch (c->gesture) {
+        case kSTZScroll:
+            state->type = kStateNotInSession;
+            return prependEvent(createZoomEvent(c->event, kCGGesturePhaseEnded, state->zoomCenter, 0));
+
+        case kSTZZoom:
+            value = magnificationFromScroll(c->event, c->fallbackScrollDir, kCGEventDistantFuture) + pending;
+            if (c->fixChromiumZoomStall && chromiumShim != 0) {
+                state->delayedZoom = value;
+                value = chromiumShim;
+            }
+            setZoomToEndAfterWaiting(state, c->event, kAutoDiscreteScrollTimeout);
+            return replaceEvent(createZoomEvent(c->event, kCGGesturePhaseChanged, state->zoomCenter, value));
+        }
+
+    case kContinuousScrollMayBegin:
+        state->type = kStateZoomInProgress;
+        return discardEvent();
+
+    case kContinuousScrollBegan:
+    case kContinuousScrollChanged:
+        switch (c->gesture) {
+        case kSTZScroll:
+            setScrollOf(c->event, kContinuousScrollBegan);
+            state->type = kStateScrollInProgress;
+            return prependEvent(createZoomEvent(c->event, kCGGesturePhaseEnded, state->zoomCenter, 0));
+
+        case kSTZZoom:
+            value = magnificationFromScroll(c->event, c->fallbackScrollDir, kCGEventDistantFuture) + pending;
+            if (c->fixChromiumZoomStall && chromiumShim != 0) {
+                state->chromiumZoomShim = value;
+                value = chromiumShim;
+            }
+            state->type = kStateZoomInProgress;
+            return replaceEvent(createZoomEvent(c->event, kCGGesturePhaseChanged, state->zoomCenter, value));
+        }
+
+    case kContinuousScrollEnded:
+    case kContinuousScrollCancelled:
+        //  Waiting for `kMomentumScrollBegan` to avoid interrupting the zoom session.
+        setZoomToEndAfterWaiting(state, c->event, kMomentumScrollTimeout);
+        return discardEvent();
+
+    case kMomentumScrollBegan:
+    case kMomentumScrollChanged:
+        switch (c->gesture) {
+        case kSTZScroll:
+            setScrollOf(c->event, kMomentumScrollBegan);
+            state->type = kStateMomentumScrollInProgress;
+            return prependEvent(createZoomEvent(c->event, kCGGesturePhaseEnded, state->zoomCenter, 0));
+
+        case kSTZZoom:
+            value = magnificationFromScroll(c->event, c->fallbackScrollDir, state->momentumStart) + pending;
+            if (c->fixChromiumZoomStall && chromiumShim != 0) {
+                state->chromiumZoomShim = value;
+                value = chromiumShim;
+            }
+            if (value == 0) {
+                state->type = kStateZoomStoppedByAttenuation;
+                return replaceEvent(createZoomEvent(c->event, kCGGesturePhaseEnded, state->zoomCenter, value));
+            } else {
+                state->type = kStateZoomInProgress;
+                return replaceEvent(createZoomEvent(c->event, kCGGesturePhaseChanged, state->zoomCenter, value));
+            }
+        }
+
+    case kMomentumScrollEnded:
+        state->type = kStateNotInSession;
+        return replaceEvent(createZoomEvent(c->event, kCGGesturePhaseEnded, state->zoomCenter, 0));
+    }
+}
+
+
+//  MARK: - Event Adaptation
+
+
+bool STZIsScrollEventNoOp(CGEventRef event) {
+    if (CGEventGetIntegerValueField(event, kCGScrollWheelEventPointDeltaAxis1) != 0) {return false;}
+    if (CGEventGetDoubleValueField(event, kCGScrollWheelEventFixedPtDeltaAxis1) != 0) {return false;}
+    if (CGEventGetIntegerValueField(event, kCGScrollWheelEventPointDeltaAxis2) != 0) {return false;}
+    if (CGEventGetDoubleValueField(event, kCGScrollWheelEventFixedPtDeltaAxis2) != 0) {return false;}
+    return true;
+}
+
+
+bool STZIsScrollEventDiscrete(CGEventRef event) {
+    ScrollType scroll = scrollOf(event);
+    return scroll == kDiscretelyScrolled;
+}
+
+
+bool STZScrollEventMayFallIntoMomentum(CGEventRef event) {
+    ScrollType scroll = scrollOf(event);
+    return (scroll >= kMomentumScrollBegan && scroll <= kMomentumScrollEnded)
+        || scroll == kContinuousScrollEnded;
+}
+
+
+static ScrollType scrollOf(CGEventRef event) {
+    assert(CGEventGetType(event) == kCGEventScrollWheel);
+
+    CGScrollPhase sPhase = (CGScrollPhase)CGEventGetIntegerValueField(event, kCGScrollWheelEventScrollPhase);
+    CGMomentumScrollPhase pPhase = (CGMomentumScrollPhase)CGEventGetIntegerValueField(event, kCGScrollWheelEventMomentumPhase);
+
+    if (pPhase == kCGMomentumScrollPhaseNone) {
+        switch (sPhase) {
+        case 0 /* Non-continuous */:            return kDiscretelyScrolled;
+        case kCGScrollPhaseMayBegin:            return kContinuousScrollMayBegin;
+        case kCGScrollPhaseBegan:               return kContinuousScrollBegan;
+        case kCGScrollPhaseChanged:             return kContinuousScrollChanged;
+        case kCGScrollPhaseEnded:               return kContinuousScrollEnded;
+        case kCGScrollPhaseCancelled:           return kContinuousScrollCancelled;
+        default:
+            STZUnknownEnumCase("CGScrollPhase", sPhase);
+            return kDiscretelyScrolled;
+        }
+
+    } else {
+        switch (pPhase) {
+        case kCGMomentumScrollPhaseBegin:       return kMomentumScrollBegan;
+        case kCGMomentumScrollPhaseContinue:    return kMomentumScrollChanged;
+        case kCGMomentumScrollPhaseEnd:         return kMomentumScrollEnded;
+        default:
+            STZUnknownEnumCase("CGMomentumScrollPhase", pPhase);
+            return kMomentumScrollEnded;
+        }
+    }
+}
+
+
+static void setScrollOf(CGEventRef event, ScrollType scroll) {
+    switch (scroll) {
+    case kDiscretelyScrolled:
+        CGEventSetIntegerValueField(event, kCGScrollWheelEventScrollPhase, 0);
+        CGEventSetIntegerValueField(event, kCGScrollWheelEventMomentumPhase, 0);
+        break;
+    case kContinuousScrollMayBegin:
+        CGEventSetIntegerValueField(event, kCGScrollWheelEventScrollPhase, kCGScrollPhaseMayBegin);
+        CGEventSetIntegerValueField(event, kCGScrollWheelEventMomentumPhase, 0);
+        break;
+    case kContinuousScrollBegan:
+        CGEventSetIntegerValueField(event, kCGScrollWheelEventScrollPhase, kCGScrollPhaseBegan);
+        CGEventSetIntegerValueField(event, kCGScrollWheelEventMomentumPhase, 0);
+        break;
+    case kContinuousScrollChanged:
+        CGEventSetIntegerValueField(event, kCGScrollWheelEventScrollPhase, kCGScrollPhaseChanged);
+        CGEventSetIntegerValueField(event, kCGScrollWheelEventMomentumPhase, 0);
+        break;
+    case kContinuousScrollEnded:
+        CGEventSetIntegerValueField(event, kCGScrollWheelEventScrollPhase, kCGScrollPhaseEnded);
+        CGEventSetIntegerValueField(event, kCGScrollWheelEventMomentumPhase, 0);
+        break;
+    case kContinuousScrollCancelled:
+        CGEventSetIntegerValueField(event, kCGScrollWheelEventScrollPhase, kCGScrollPhaseCancelled);
+        CGEventSetIntegerValueField(event, kCGScrollWheelEventMomentumPhase, 0);
+        break;
+    case kMomentumScrollBegan:
+        CGEventSetIntegerValueField(event, kCGScrollWheelEventScrollPhase, 0);
+        CGEventSetIntegerValueField(event, kCGScrollWheelEventMomentumPhase, kCGMomentumScrollPhaseBegin);
+        break;
+    case kMomentumScrollChanged:
+        CGEventSetIntegerValueField(event, kCGScrollWheelEventScrollPhase, 0);
+        CGEventSetIntegerValueField(event, kCGScrollWheelEventMomentumPhase, kCGMomentumScrollPhaseContinue);
+        break;
+    case kMomentumScrollEnded:
+        CGEventSetIntegerValueField(event, kCGScrollWheelEventScrollPhase, 0);
+        CGEventSetIntegerValueField(event, kCGScrollWheelEventMomentumPhase, kCGMomentumScrollPhaseEnd);
+        break;
+    }
+}
+
+
+static CGEventRef createZoomEvent(CGEventRef event, CGGesturePhase phase, CGPoint center, double value) {
+    CGEventSourceRef source = CGEventCreateSourceFromEvent(event);
+    CGEventRef zoom = CGEventCreate(source);
+    if (source) {CFRelease(source);}
+
+    CGEventSetType(zoom, kCGEventGesture);
+    CGEventSetFlags(zoom, CGEventGetFlags(event));
+    CGEventSetLocation(zoom, center);
+    CGEventSetTimestamp(zoom, CGEventGetTimestamp(event));
+    CGEventSetIntegerValueField(zoom, kCGGestureEventHIDType, kIOHIDEventTypeZoom);
+    CGEventSetIntegerValueField(zoom, kCGGestureEventPhase, phase);
+    CGEventSetDoubleValueField(zoom, kCGGestureEventZoomValue, value);
+
+    return zoom;
+}
+
+
+bool STZCreateCommandBasedZoomKeyEventPair(CGEventRef event, CGEventRef *outEvents) {
+    double value = magnificationFromScroll(event, 0, kCGEventDistantFuture);
+    if (value == 0) {return false;}
+
+    CGEventSourceRef source = CGEventCreateSourceFromEvent(event);
+
+    for (int i = 0; i < 2; ++i) {
+        CGEventRef key = CGEventCreate(source);
+        CGEventSetType(key, i == 0 ? kCGEventKeyDown : kCGEventKeyUp);
+        CGEventSetFlags(key, kCGEventFlagMaskCommand | (value > 0 ? kCGEventFlagMaskShift : 0));
+        CGEventSetLocation(key, CGEventGetLocation(event));
+        CGEventSetTimestamp(key, CGEventGetTimestamp(event));
+        CGEventSetIntegerValueField(key, kCGKeyboardEventKeycode, value > 0 ? 24 : 27);
+        CGEventSetIntegerValueField(key, kCGKeyboardEventKeyboardType, 43);  //  ANSI
+        outEvents[i] = key;
+    }
+
+    if (source) {CFRelease(source);}
+    return true;
+}

@@ -1,184 +1,131 @@
 import CoreGraphics
 import CoreVideo
-import Darwin
+import AppKit
 import Foundation
 
-/// Display-synchronised smoothing for discrete mouse wheels.
+/// Mouse-wheel smoothing ported from Mos's ScrollCore/ScrollEvent,
+/// ScrollFilter, ScrollPhase and ScrollPoster flow.
 ///
-/// Motion-curve reference: Mos by Caldis, https://github.com/Caldis/Mos.
-/// Event construction/routing reference: Mac Mouse Fix by Noah Nuebling,
-/// https://github.com/noah-nuebling/mac-mouse-fix.
-/// The curve follows Mos's target/lerp plus curve-peak filtering model, with
-/// two important safety changes for AZS Tools:
-/// - physical wheel events are consumed only after a healthy poster and a
-///   valid event-posting permission have been confirmed;
-/// - replacement frames are clean continuous-scroll events posted at the
-///   session event tap, so WindowServer routes them to the window currently
-///   under the pointer instead of pinning them to a cached process ID.
-/// Trackpad, Magic Mouse and already-continuous input always remain native.
+/// The implementation intentionally keeps Mos's data path:
+///   physical wheel -> buffer/current interpolation -> curve filter
+///   -> PointDeltaAxis event -> CGSessionEventTap
+///
+/// It does not rewrite private event fields. The original event template and
+/// target PID are retained for the complete gesture, just as Mos does through
+/// ScrollDispatchContext. AZS posts at the session boundary because its own
+/// marker safely bypasses the shared input tap and permits cross-app delivery.
 final class AZSSmoothScrollEngine {
     static let shared = AZSSmoothScrollEngine()
 
-    /// "AZSSMOOT". Synthetic events are ignored defensively if they ever pass
-    /// through the session event tap again.
+    /// "AZSSMOOT". Used only to prevent a posted replacement event from being
+    /// picked up by the input tap a second time.
     static let syntheticEventMarker: Int64 = 0x415A53534D4F4F54
-    // Mac Mouse Fix writes the event type through Quartz field 55 when
-    // constructing its clean scroll events. Keep a public-API fallback in case
-    // a future SDK stops exposing that raw field.
-    private static let eventTypeField = CGEventField(rawValue: 55)
 
-    /// One axis of the Mos-style motion model. `current` follows `target` and
-    /// `filteredFrame` removes the sharp velocity peak produced by a wheel
-    /// notch. `displayed` integrates that filtered velocity, so the complete
-    /// gesture still lands on the exact requested pixel distance.
-    private struct AxisState {
-        var target = 0.0
-        var current = 0.0
-        var filteredFrame = 0.0
-        var displayed = 0.0
-        var emitted = 0.0
-        var inputDirection = 0.0
-
-        func reverses(with delta: Double) -> Bool {
-            delta != 0 && inputDirection != 0 && inputDirection * delta < 0
-        }
-
-        mutating func append(_ delta: Double, maximumBacklog: Double) {
-            guard delta != 0 else { return }
-            let boundedDelta = max(-maximumBacklog, min(maximumBacklog, delta))
-            target = max(current - maximumBacklog,
-                         min(current + maximumBacklog, target + boundedDelta))
-            inputDirection = boundedDelta
-        }
-
-        mutating func advance(motionTransition: Double,
-                              filterTransition: Double,
-                              deadZone: Double) -> Int32 {
-            let rawFrame = (target - current) * motionTransition
-            current += rawFrame
-
-            // Mos's curve-peak filter is a low-pass over each interpolated
-            // frame. Integrating the filtered frames preserves distance while
-            // removing the harsh first-frame jump of a mechanical wheel.
-            filteredFrame += (rawFrame - filteredFrame) * filterTransition
-            displayed += filteredFrame
-
-            let settled = abs(target - current) <= deadZone &&
-                abs(filteredFrame) <= deadZone &&
-                abs(target - displayed) <= 0.75
-            if settled {
-                current = target
-                filteredFrame = 0
-                displayed = target
-            }
-
-            let desiredPixelPosition = (settled ? target : displayed).rounded()
-            let pixelDelta = desiredPixelPosition - emitted
-            emitted = desiredPixelPosition
-            return Self.clampedInt32(pixelDelta)
-        }
-
-        func isSettled(deadZone: Double) -> Bool {
-            abs(target - current) <= deadZone &&
-                abs(filteredFrame) <= deadZone &&
-                abs(target - displayed) <= 0.75
-        }
-
-        mutating func reset() {
-            target = 0
-            current = 0
-            filteredFrame = 0
-            displayed = 0
-            emitted = 0
-            inputDirection = 0
-        }
-
-        private static func clampedInt32(_ value: Double) -> Int32 {
-            let bounded = max(Double(Int32.min), min(Double(Int32.max), value))
-            return Int32(bounded)
-        }
+    private enum Phase {
+        case idle
+        case hold
+        case trackingBegin
+        case trackingOngoing
+        case trackingEnd
+        case momentumBegin
+        case momentumOngoing
+        case momentumEnd
+        case leave
     }
 
-    /// Mac Mouse Fix keeps line deltas cumulative while emitting precise pixel
-    /// deltas. Biasing the first value away from zero makes the first visible
-    /// frame responsive without multiplying every 1-3 px frame into one line.
-    private struct BiasedLineQuantizer {
-        private var roundingError = 0.0
-        private var direction = 0.0
-
-        mutating func quantize(pixelDelta: Int32) -> Int64 {
-            guard pixelDelta != 0 else { return 0 }
-            let input = Double(pixelDelta) / 10.0
-            if direction == 0 || direction * input < 0 {
-                roundingError = 0
-                direction = input < 0 ? -1 : 1
-            }
-
-            let precise = input + roundingError
-            let rounded = direction > 0 ? ceil(precise) : floor(precise)
-            roundingError = precise - rounded
-            return Int64(rounded)
-        }
-
-        mutating func reset() {
-            roundingError = 0
-            direction = 0
-        }
+    private struct PhaseTransitionPlan {
+        let queue: [(Phase, Phase?)]
+        let target: (Phase, Phase?)?
     }
 
-    private struct FramePacket {
+    private struct AxisData {
+        var line = Int64(0)
+        var point = 0.0
+        var fixed = 0.0
+        var usable = 0.0
+        var valid = false
+    }
+
+    private struct FrameSnapshot {
         let generation: UInt64
-        let vertical: Int32
-        let horizontal: Int32
-        let verticalLine: Int64
-        let horizontalLine: Int64
-        let flags: CGEventFlags
+        let event: CGEvent
+        let targetPID: pid_t
         let capturedAt: CFTimeInterval
+        let vertical: Double
+        let horizontal: Double
+        let phase: (scroll: Double, momentum: Double)?
     }
 
     private let lock = NSLock()
-    private let postQueue = DispatchQueue(label: "site.vncard.azstools.smooth-scroll.post",
-                                          qos: .userInteractive)
+    private let postQueue = DispatchQueue(label: "site.vncard.azstools.mos.post",
+                                           qos: .userInteractive)
+
     private var displayLink: CVDisplayLink?
     private var enabled = false
-    private var smoothness = 0.72
-    private var speed = 1.0
-    private var vertical = AxisState()
-    private var horizontal = AxisState()
-    private var verticalLine = BiasedLineQuantizer()
-    private var horizontalLine = BiasedLineQuantizer()
-    private var motionActive = false
-    private var latestFlags: CGEventFlags = []
+    private var postEventAccess = false
+    private var step = 33.6
+    private var speed = 2.70
+    private var durationTransition = 0.074
+    private var deadZone = 1.0
+    private var simulatesTrackpad = false
+
+    // These are the same four values used by Mos's ScrollPoster.
+    private var current = (y: 0.0, x: 0.0)
+    private var delta = (y: 0.0, x: 0.0)
+    private var buffer = (y: 0.0, x: 0.0)
+    private var filter = MosCurveFilter()
+
+    private var lastManualEventTime: CFTimeInterval = 0
+    private var manualInputEnded = true
+    private var momentumActive = false
+    private var momentumEndScheduledTime: CFTimeInterval?
+    private var trackingEndScheduledTime: CFTimeInterval?
+    private var phase = Phase.idle
+    private var pendingPhaseAfterDelivery: Phase?
+
+    private var eventTemplate: CGEvent?
+    private var targetPID: pid_t = 0
+    private var capturedAt: CFTimeInterval = 0
     private var generation: UInt64 = 0
-    private var lastInputTime: CFTimeInterval = 0
-    private var lastFrameTime: CFTimeInterval = 0
     private var lastDisplayLinkCallbackTime: CFTimeInterval = 0
     private var recoveryScheduled = false
 
-    private let gestureSeparation: CFTimeInterval = 0.45
-    private let displayLinkStaleThreshold: CFTimeInterval = 1.0
-    private let postedFrameTTL: CFTimeInterval = 0.25
-    private let baseStep = 33.6
-    private let maximumInputMultiplier = 4.0
-    // Half a pixel is below visible precision but avoids dragging a single
-    // notch through a long sub-pixel tail. The exact final pixel is flushed.
-    private let deadZone = 0.50
+    private let manualContinuationThreshold: CFTimeInterval = 0.18
+    private let manualSeparationThreshold: CFTimeInterval = 0.45
+    private let trackingEndAdvance: CFTimeInterval = 0.04
+    private let momentumEndDelay: CFTimeInterval = 0.13
+    private let eventTTL: CFTimeInterval = 5.0
 
     private init() {}
 
-    func configure(enabled: Bool, smoothness: Double, speed: Double) {
-        let boundedSmoothness = max(0.25, min(1.0, smoothness))
-        let boundedSpeed = max(0.50, min(2.00, speed))
+    func configure(enabled: Bool,
+                   step: Double,
+                   speed: Double,
+                   duration: Double,
+                   deadZone: Double,
+                   simulatesTrackpad: Bool) {
+        let boundedStep = max(10.0, min(80.0, step))
+        let boundedSpeed = max(0.50, min(5.00, speed))
+        let boundedDuration = max(0.50, min(5.00, duration))
+        let boundedDeadZone = max(0.25, min(3.00, deadZone))
+        // Mos: 1 - sqrt(duration / 5.2), rounded to three decimals.
+        let transition = max(0.001,
+                             1.0 - sqrt(boundedDuration / 5.2))
+        let roundedTransition = Double((transition * 1000.0).rounded() / 1000.0)
 
         lock.lock()
-        let settingsChanged = self.enabled != enabled ||
-            self.smoothness != boundedSmoothness || self.speed != boundedSpeed
+        let changed = self.enabled != enabled ||
+            self.step != boundedStep || self.speed != boundedSpeed ||
+            self.durationTransition != roundedTransition ||
+            self.deadZone != boundedDeadZone ||
+            self.simulatesTrackpad != simulatesTrackpad
         self.enabled = enabled
-        self.smoothness = boundedSmoothness
+        self.step = boundedStep
         self.speed = boundedSpeed
-        if settingsChanged {
-            clearMotionLocked(invalidateQueuedFrames: true)
-        }
+        self.durationTransition = roundedTransition
+        self.deadZone = boundedDeadZone
+        self.simulatesTrackpad = simulatesTrackpad
+        if changed { resetLocked(invalidateGeneration: true) }
         if !enabled { recoveryScheduled = false }
         lock.unlock()
 
@@ -189,81 +136,106 @@ final class AZSSmoothScrollEngine {
         }
     }
 
-    /// Captures one physical wheel event. `true` means the event tap must
-    /// consume the original event because this engine now owns the complete
-    /// gesture. `false` is a fail-open native pass-through.
+    /// Returns true only when MOS has captured the event and has a running
+    /// replacement poster. Otherwise the original wheel event is preserved.
     func process(_ event: CGEvent) -> Bool {
         if event.getIntegerValueField(.eventSourceUserData) == Self.syntheticEventMarker {
             return false
         }
 
-        guard Self.isDiscreteMouseWheel(event) else {
-            // Native momentum must take over immediately without an old mouse
-            // tail continuing underneath it.
+        let input = MosWheelEvent(event: event)
+        guard input.hasUsableDelta else {
+            return false
+        }
+
+        // This is Mos's trackpad test: phase or scrollCount identifies native
+        // continuous input. Native trackpad/Magic Mouse input must pass through.
+        guard !input.isTrackpad else {
             resetMotion()
             return false
         }
 
-        let rawVertical = Self.axisValue(event,
-                                         point: .scrollWheelEventPointDeltaAxis1,
-                                         fixed: .scrollWheelEventFixedPtDeltaAxis1,
-                                         line: .scrollWheelEventDeltaAxis1)
-        let rawHorizontal = Self.axisValue(event,
-                                           point: .scrollWheelEventPointDeltaAxis2,
-                                           fixed: .scrollWheelEventFixedPtDeltaAxis2,
-                                           line: .scrollWheelEventDeltaAxis2)
-        guard rawVertical != 0 || rawHorizontal != 0,
-              CGPreflightPostEventAccess() else {
+        // Match Mos's remote-control exception without treating every mouse
+        // event with IsContinuous=1 as a trackpad event.
+        if Self.isRemoteSmoothedEvent(event) {
             resetMotion()
             return false
         }
+
+        // Never consume the physical wheel event unless macOS currently lets
+        // us synthesize its replacement. CGEventPostToPid has no return value,
+        // so failing open here is the only way to guarantee that enabling MOS
+        // cannot make the wheel stop scrolling altogether.
+        lock.lock()
+        let canPost = postEventAccess
+        lock.unlock()
+        guard canPost,
+              let copiedEvent = event.copy() else {
+            resetMotion()
+            return false
+        }
+
+        ensureDisplayLinkRunning()
 
         let now = CFAbsoluteTimeGetCurrent()
-        let uptime = ProcessInfo.processInfo.systemUptime
-
         lock.lock()
         guard enabled,
               let link = displayLink,
               CVDisplayLinkIsRunning(link),
-              uptime - lastDisplayLinkCallbackTime <= displayLinkStaleThreshold else {
+              targetPIDForPosting(event) > 0 else {
             lock.unlock()
-            scheduleDisplayLinkRecovery()
             return false
         }
 
-        if lastInputTime == 0 || now - lastInputTime >= gestureSeparation {
-            clearMotionLocked(invalidateQueuedFrames: true)
+        let separatedByTime = lastManualEventTime == 0 ||
+            now - lastManualEventTime >= manualSeparationThreshold
+        let separatedPhase = phase == .idle || phase == .leave ||
+            phase == .momentumEnd || phase == .trackingEnd
+        let separated = manualInputEnded || separatedByTime || separatedPhase
+
+        if input.y.valid {
+            let y = input.y.usable < 0
+                ? -max(abs(input.y.usable), step)
+                : max(abs(input.y.usable), step)
+            if y * delta.y > 0 {
+                buffer.y += y * speed
+            } else {
+                buffer.y = y * speed
+                current.y = 0
+            }
+            delta.y = y
+        }
+        if input.x.valid {
+            let x = input.x.usable < 0
+                ? -max(abs(input.x.usable), step)
+                : max(abs(input.x.usable), step)
+            if x * delta.x > 0 {
+                buffer.x += x * speed
+            } else {
+                buffer.x = x * speed
+                current.x = 0
+            }
+            delta.x = x
         }
 
-        let configuredSpeed = speed
-        let maximumInput = baseStep * maximumInputMultiplier
-        let y = Self.normalizedWheelValue(rawVertical,
-                                          minimumStep: baseStep,
-                                          maximumStep: maximumInput) * configuredSpeed
-        let x = Self.normalizedWheelValue(rawHorizontal,
-                                          minimumStep: baseStep,
-                                          maximumStep: maximumInput) * configuredSpeed
+        eventTemplate = copiedEvent
+        targetPID = targetPIDForPosting(event)
+        capturedAt = now
 
-        // Reversing direction brakes the complete old tail. It also advances
-        // the posting generation so queued frames from the old direction can
-        // never arrive after the new gesture.
-        if vertical.reverses(with: y) || horizontal.reverses(with: x) {
-            clearMotionLocked(invalidateQueuedFrames: true)
-        }
-
-        let maximumBacklog = baseStep * configuredSpeed * 24
-        vertical.append(y, maximumBacklog: maximumBacklog)
-        horizontal.append(x, maximumBacklog: maximumBacklog)
-        motionActive = true
-        latestFlags = event.flags
-        lastInputTime = now
+        let plan = manualInputDetectedPlan(isSeparated: separated)
+        emitPlanLocked(plan, delta: (0, 0), emitTargetImmediately: false)
+        lastManualEventTime = now
+        manualInputEnded = false
+        momentumActive = false
+        momentumEndScheduledTime = nil
+        trackingEndScheduledTime = nil
         lock.unlock()
         return true
     }
 
     func resetMotion() {
         lock.lock()
-        clearMotionLocked(invalidateQueuedFrames: true)
+        resetLocked(invalidateGeneration: true)
         lock.unlock()
     }
 
@@ -273,14 +245,28 @@ final class AZSSmoothScrollEngine {
     }
 
     func resumeAfterWake() {
+        let canPost = CGPreflightPostEventAccess()
         lock.lock()
         let shouldResume = enabled
+        postEventAccess = canPost
+        lock.unlock()
+        if shouldResume { recreateDisplayLink() }
+    }
+
+    /// Recreate the MOS poster after the shared Accessibility tap has been
+    /// created or rebuilt.  Startup config can run before TCC is ready, so the
+    /// poster must not be left as a pre-permission display-link session.
+    func restartAfterEventTap() {
+        let canPost = CGPreflightPostEventAccess()
+        lock.lock()
+        let shouldResume = enabled
+        postEventAccess = canPost
+        resetLocked(invalidateGeneration: true)
         lock.unlock()
         if shouldResume { recreateDisplayLink() }
     }
 
     private func ensureDisplayLinkRunning() {
-        var staleLink: CVDisplayLink?
         lock.lock()
         guard enabled else {
             recoveryScheduled = false
@@ -292,38 +278,30 @@ final class AZSSmoothScrollEngine {
             lock.unlock()
             return
         }
-        staleLink = displayLink
+        let oldLink = displayLink
         displayLink = nil
         lock.unlock()
-        if let staleLink { CVDisplayLinkStop(staleLink) }
+        if let oldLink, CVDisplayLinkIsRunning(oldLink) { CVDisplayLinkStop(oldLink) }
 
         var candidate: CVDisplayLink?
         guard CVDisplayLinkCreateWithActiveCGDisplays(&candidate) == kCVReturnSuccess,
-              let candidate else {
-            lock.lock()
-            recoveryScheduled = false
-            lock.unlock()
-            NSLog("AZS smooth scroll: could not create CVDisplayLink; using native scrolling")
-            return
-        }
-        let context = Unmanaged.passUnretained(self).toOpaque()
-        guard CVDisplayLinkSetOutputCallback(candidate,
+              let candidate,
+              CVDisplayLinkSetOutputCallback(candidate,
                                              azsSmoothScrollDisplayLinkCallback,
-                                             context) == kCVReturnSuccess,
+                                             Unmanaged.passUnretained(self).toOpaque()) == kCVReturnSuccess,
               CVDisplayLinkStart(candidate) == kCVReturnSuccess else {
-            CVDisplayLinkStop(candidate)
+            if let candidate { CVDisplayLinkStop(candidate) }
             lock.lock()
             recoveryScheduled = false
             lock.unlock()
-            NSLog("AZS smooth scroll: could not start CVDisplayLink; using native scrolling")
+            NSLog("AZS MOS: CVDisplayLink could not be started; keeping native scroll")
             return
         }
 
         lock.lock()
         if enabled && displayLink == nil {
             displayLink = candidate
-            lastFrameTime = 0
-            lastDisplayLinkCallbackTime = ProcessInfo.processInfo.systemUptime
+            lastDisplayLinkCallbackTime = CFAbsoluteTimeGetCurrent()
             recoveryScheduled = false
             lock.unlock()
         } else {
@@ -345,11 +323,8 @@ final class AZSSmoothScrollEngine {
             return
         }
         recoveryScheduled = true
-        clearMotionLocked(invalidateQueuedFrames: true)
+        resetLocked(invalidateGeneration: true)
         lock.unlock()
-
-        // Recreating a display link can be relatively expensive. Never do it
-        // inside the event-tap callback; that risks macOS disabling the tap.
         DispatchQueue.main.async { [weak self] in
             self?.recreateDisplayLink()
         }
@@ -359,210 +334,480 @@ final class AZSSmoothScrollEngine {
         lock.lock()
         let oldLink = displayLink
         displayLink = nil
-        lastFrameTime = 0
         lastDisplayLinkCallbackTime = 0
         lock.unlock()
-        if let oldLink, CVDisplayLinkIsRunning(oldLink) {
-            CVDisplayLinkStop(oldLink)
-        }
+        if let oldLink, CVDisplayLinkIsRunning(oldLink) { CVDisplayLinkStop(oldLink) }
     }
 
-    fileprivate func renderFrame(at hostTime: UInt64) -> CVReturn {
-        let now: CFTimeInterval
-        if hostTime != 0 {
-            now = Double(hostTime) / CVGetHostClockFrequency()
-        } else {
-            now = ProcessInfo.processInfo.systemUptime
-        }
+    fileprivate func renderFrame() -> CVReturn {
+        var stopPhase: Phase?
+        var frames: [FrameSnapshot] = []
 
         lock.lock()
-        lastDisplayLinkCallbackTime = now
-        guard enabled, motionActive else {
-            lastFrameTime = now
+        lastDisplayLinkCallbackTime = CFAbsoluteTimeGetCurrent()
+        guard enabled else {
             lock.unlock()
             return kCVReturnSuccess
         }
 
-        let dt: Double
-        if lastFrameTime == 0 {
-            dt = 1.0 / 60.0
-        } else {
-            // Frame-rate independence keeps the same curve on 60/120/144 Hz.
-            // Clamping wake/debugger gaps prevents a large catch-up jump.
-            dt = max(1.0 / 240.0, min(1.0 / 30.0, now - lastFrameTime))
-        }
-        lastFrameTime = now
+        // Exact Mos interpolation: current += lerp(current, buffer, duration).
+        let frame = (
+            y: (buffer.y - current.y) * durationTransition,
+            x: (buffer.x - current.x) * durationTransition
+        )
+        current.y += frame.y
+        current.x += frame.x
 
-        let motionAt60Hz = transitionAt60HzLocked()
-        // Mos uses 0.23. A slightly faster 0.27 follower removes its initial
-        // zero frame while retaining the same rounded acceleration profile.
-        let filterAt60Hz = 0.27
-        let frameScale = dt * 60.0
-        let motionTransition = 1.0 - pow(1.0 - motionAt60Hz, frameScale)
-        let filterTransition = 1.0 - pow(1.0 - filterAt60Hz, frameScale)
+        let filtered = filter.fill(with: frame)
+        let now = CFAbsoluteTimeGetCurrent()
 
-        let outputY = vertical.advance(motionTransition: motionTransition,
-                                       filterTransition: filterTransition,
-                                       deadZone: deadZone)
-        let outputX = horizontal.advance(motionTransition: motionTransition,
-                                         filterTransition: filterTransition,
-                                         deadZone: deadZone)
-        let packet: FramePacket?
-        if outputY != 0 || outputX != 0 {
-            packet = FramePacket(generation: generation,
-                                 vertical: outputY,
-                                 horizontal: outputX,
-                                 verticalLine: verticalLine.quantize(pixelDelta: outputY),
-                                 horizontalLine: horizontalLine.quantize(pixelDelta: outputX),
-                                 flags: latestFlags,
-                                 capturedAt: ProcessInfo.processInfo.systemUptime)
-        } else {
-            packet = nil
+        if !manualInputEnded,
+           lastManualEventTime > 0,
+           now - lastManualEventTime > manualContinuationThreshold {
+            let endPlan = manualInputEndedPlan()
+            emitPlanLocked(endPlan, delta: (0, 0), emitTargetImmediately: true, into: &frames)
+            manualInputEnded = true
+            if trackingEndScheduledTime == nil {
+                trackingEndScheduledTime = now + trackingEndAdvance
+            }
         }
-        let settled = vertical.isSettled(deadZone: deadZone) &&
-            horizontal.isSettled(deadZone: deadZone)
-        if settled {
-            // Natural completion must not invalidate the final frames already
-            // queued for posting.
-            clearMotionLocked(invalidateQueuedFrames: false)
+
+        let residualY = buffer.y - current.y
+        let residualX = buffer.x - current.x
+        let residualMagnitude = max(abs(residualY), abs(residualX))
+
+        if manualInputEnded && residualMagnitude > deadZone {
+            if !momentumActive {
+                emitPlanLocked(momentumStartPlan(), delta: (0, 0), emitTargetImmediately: false)
+                momentumActive = true
+            } else {
+                emitPlanLocked(momentumOngoingPlan(), delta: (0, 0), emitTargetImmediately: false)
+            }
+            momentumEndScheduledTime = nil
+            trackingEndScheduledTime = nil
+        } else if momentumActive && residualMagnitude <= deadZone {
+            if momentumEndScheduledTime == nil {
+                momentumEndScheduledTime = now + momentumEndDelay
+            }
+        } else {
+            momentumEndScheduledTime = nil
+            if momentumActive { momentumActive = false }
+        }
+
+        let outputMagnitude = max(abs(filtered.y), abs(filtered.x))
+        if outputMagnitude > deadZone {
+            if let frame = makeFrameLocked(vertical: filtered.y,
+                                           horizontal: filtered.x,
+                                           useCurrentPhase: true) {
+                frames.append(frame)
+                didDeliverFrameLocked()
+            }
+        }
+
+        if let scheduled = momentumEndScheduledTime,
+           momentumActive,
+           now >= scheduled {
+            momentumEndScheduledTime = nil
+            momentumActive = false
+            stopPhase = .momentumEnd
+        }
+
+        if stopPhase == nil,
+           manualInputEnded,
+           !momentumActive,
+           residualMagnitude <= deadZone,
+           let scheduled = trackingEndScheduledTime,
+           now >= scheduled,
+           outputMagnitude <= deadZone {
+            trackingEndScheduledTime = nil
+            stopPhase = .trackingEnd
+        } else if stopPhase == nil {
+            trackingEndScheduledTime = nil
         }
         lock.unlock()
 
-        if let packet { enqueue(packet) }
+        for frame in frames { enqueue(frame) }
+        if let stopPhase { finish(phase: stopPhase) }
         return kCVReturnSuccess
     }
 
-    private func clearMotionLocked(invalidateQueuedFrames: Bool) {
-        if invalidateQueuedFrames { generation &+= 1 }
-        vertical.reset()
-        horizontal.reset()
-        verticalLine.reset()
-        horizontalLine.reset()
-        motionActive = false
-        latestFlags = []
-        lastInputTime = 0
+    private func finish(phase endPhase: Phase) {
+        lock.lock()
+        let link = displayLink
+        let shouldFinish = enabled
+        lock.unlock()
+        // Stop outside the state lock. CVDisplayLinkStop may wait for an
+        // in-flight callback, and that callback also takes this lock.
+        if shouldFinish, let link, CVDisplayLinkIsRunning(link) {
+            CVDisplayLinkStop(link)
+        }
+
+        lock.lock()
+        guard enabled else {
+            lock.unlock()
+            return
+        }
+        generation &+= 1
+        let plan = momentumEndPlanOrTrackingEndPlan(for: endPhase)
+        var frames: [FrameSnapshot] = []
+        if simulatesTrackpad {
+            emitPlanLocked(plan, delta: (0, 0), emitTargetImmediately: true, into: &frames)
+        }
+        resetLocked(invalidateGeneration: false)
+        lock.unlock()
+        for frame in frames { enqueue(frame) }
+        // Keep the poster alive for the next physical wheel event.
+        ensureDisplayLinkRunning()
     }
 
-    private func transitionAt60HzLocked() -> Double {
-        // Higher smoothness means a smaller target transition and a longer,
-        // softer tail. These bounds keep even 100% smoothness responsive.
-        0.25 - (0.13 * smoothness)
+    private func resetLocked(invalidateGeneration: Bool) {
+        if invalidateGeneration { generation &+= 1 }
+        current = (0, 0)
+        delta = (0, 0)
+        buffer = (0, 0)
+        filter.reset()
+        lastManualEventTime = 0
+        manualInputEnded = true
+        momentumActive = false
+        momentumEndScheduledTime = nil
+        trackingEndScheduledTime = nil
+        phase = .idle
+        pendingPhaseAfterDelivery = nil
+        eventTemplate = nil
+        targetPID = 0
+        capturedAt = 0
     }
 
-    private func enqueue(_ packet: FramePacket) {
-        postQueue.async { [weak self] in
-            guard let self,
-                  self.isCurrentGeneration(packet.generation),
-                  ProcessInfo.processInfo.systemUptime - packet.capturedAt <= self.postedFrameTTL,
-                  let event = CGEvent(source: nil) else { return }
-
-            // Mac Mouse Fix creates a clean event and posts it to the session
-            // stream. WindowServer then performs normal hit-testing using the
-            // current pointer location, including for non-active app windows.
-            if let eventTypeField = Self.eventTypeField {
-                event.setIntegerValueField(eventTypeField,
-                                           value: Int64(CGEventType.scrollWheel.rawValue))
-            } else {
-                event.type = .scrollWheel
+    private func manualInputDetectedPlan(isSeparated: Bool) -> PhaseTransitionPlan {
+        if phase == .momentumBegin || phase == .momentumOngoing {
+            if isSeparated {
+                return PhaseTransitionPlan(queue: [(.momentumEnd, .idle),
+                                                   (.trackingBegin, .trackingOngoing)],
+                                           target: nil)
             }
+            return PhaseTransitionPlan(queue: [(.momentumEnd, .idle)],
+                                       target: (.trackingBegin, .trackingOngoing))
+        }
+        if isSeparated {
+            return PhaseTransitionPlan(queue: [(.trackingBegin, .trackingOngoing)],
+                                       target: nil)
+        }
+        if phase == .trackingBegin || phase == .trackingOngoing {
+            return PhaseTransitionPlan(queue: [], target: (.trackingOngoing, nil))
+        }
+        return PhaseTransitionPlan(queue: [], target: (.trackingBegin, .trackingOngoing))
+    }
 
-            // Overwrite all public representations in line -> point -> fixed
-            // order. Some macOS versions derive FixedPt from PointDelta, so
-            // writing FixedPt last keeps every receiving framework coherent.
-            Self.writePixelEvent(event,
-                                 vertical: packet.vertical,
-                                 horizontal: packet.horizontal,
-                                 verticalLine: packet.verticalLine,
-                                 horizontalLine: packet.horizontalLine)
-            event.flags = packet.flags
-            event.setIntegerValueField(.eventSourceUserData, value: Self.syntheticEventMarker)
-            event.timestamp = CGEventTimestamp(mach_absolute_time())
+    private func manualInputEndedPlan() -> PhaseTransitionPlan {
+        switch phase {
+        case .trackingBegin, .trackingOngoing:
+            return PhaseTransitionPlan(queue: [], target: (.trackingEnd, nil))
+        default:
+            return PhaseTransitionPlan(queue: [], target: nil)
+        }
+    }
+
+    private func momentumStartPlan() -> PhaseTransitionPlan {
+        switch phase {
+        case .trackingEnd, .momentumEnd:
+            return PhaseTransitionPlan(queue: [], target: (.momentumBegin, .momentumOngoing))
+        case .momentumBegin:
+            return PhaseTransitionPlan(queue: [], target: (.momentumOngoing, nil))
+        default:
+            return PhaseTransitionPlan(queue: [], target: nil)
+        }
+    }
+
+    private func momentumOngoingPlan() -> PhaseTransitionPlan {
+        phase == .momentumBegin
+            ? PhaseTransitionPlan(queue: [], target: (.momentumOngoing, nil))
+            : PhaseTransitionPlan(queue: [], target: nil)
+    }
+
+    private func momentumEndPlanOrTrackingEndPlan(for endPhase: Phase) -> PhaseTransitionPlan {
+        switch endPhase {
+        case .momentumEnd:
+            switch phase {
+            case .momentumBegin, .momentumOngoing:
+                return PhaseTransitionPlan(queue: [], target: (.momentumEnd, .idle))
+            default:
+                return PhaseTransitionPlan(queue: [], target: nil)
+            }
+        case .trackingEnd:
+            switch phase {
+            case .trackingBegin, .trackingOngoing, .trackingEnd:
+                return PhaseTransitionPlan(queue: [], target: (.trackingEnd, .idle))
+            default:
+                return PhaseTransitionPlan(queue: [], target: nil)
+            }
+        default:
+            return PhaseTransitionPlan(queue: [], target: nil)
+        }
+    }
+
+    private func emitPlanLocked(_ plan: PhaseTransitionPlan,
+                                delta: (y: Double, x: Double),
+                                emitTargetImmediately: Bool,
+                                into frames: inout [FrameSnapshot]) {
+        for item in plan.queue {
+            emitPhaseLocked(item, delta: delta, into: &frames)
+        }
+        if let target = plan.target {
+            if emitTargetImmediately {
+                emitPhaseLocked(target, delta: delta, into: &frames)
+            } else {
+                phase = target.0
+                pendingPhaseAfterDelivery = target.1
+            }
+        }
+    }
+
+    private func emitPlanLocked(_ plan: PhaseTransitionPlan,
+                                delta: (y: Double, x: Double),
+                                emitTargetImmediately: Bool) {
+        var ignored: [FrameSnapshot] = []
+        emitPlanLocked(plan, delta: delta, emitTargetImmediately: emitTargetImmediately, into: &ignored)
+        for frame in ignored { enqueue(frame) }
+    }
+
+    private func emitPhaseLocked(_ item: (Phase, Phase?),
+                                 delta: (y: Double, x: Double),
+                                 into frames: inout [FrameSnapshot]) {
+        phase = item.0
+        pendingPhaseAfterDelivery = item.1
+        if let frame = makeFrameLocked(vertical: delta.y,
+                                       horizontal: delta.x,
+                                       useCurrentPhase: false) {
+            frames.append(frame)
+            didDeliverFrameLocked()
+        } else {
+            didDeliverFrameLocked()
+        }
+    }
+
+    private func didDeliverFrameLocked() {
+        if let next = pendingPhaseAfterDelivery {
+            phase = next
+            pendingPhaseAfterDelivery = nil
+        }
+    }
+
+    private func makeFrameLocked(vertical: Double,
+                                 horizontal: Double,
+                                 useCurrentPhase: Bool) -> FrameSnapshot? {
+        guard let template = eventTemplate?.copy(),
+              targetPID > 0,
+              CFAbsoluteTimeGetCurrent() - capturedAt <= eventTTL else {
+            return nil
+        }
+        let phaseValues = simulatesTrackpad
+            ? values(for: useCurrentPhase ? phase : phase)
+            : nil
+        return FrameSnapshot(generation: generation,
+                             event: template,
+                             targetPID: targetPID,
+                             capturedAt: capturedAt,
+                             vertical: vertical,
+                             horizontal: horizontal,
+                             phase: phaseValues)
+    }
+
+    private func enqueue(_ frame: FrameSnapshot) {
+        postQueue.async { [weak self] in
+            guard let self else { return }
+            self.lock.lock()
+            let valid = self.enabled && self.generation == frame.generation
+            self.lock.unlock()
+            guard valid,
+                  CFAbsoluteTimeGetCurrent() - frame.capturedAt <= self.eventTTL,
+                  let event = frame.event.copy() else { return }
+
+            // Mos's poster payload is the interpolated PointDeltaAxis and,
+            // when enabled, the public phase fields. Standalone Mos delivers
+            // straight to the target PID, where replacing PointDelta is
+            // sufficient. AZS has to post at the session boundary for reliable
+            // cross-app delivery, so the physical wheel's line/fixed deltas
+            // must be cleared first. Otherwise every display-link frame also
+            // repeats the original wheel notch and scrolling becomes many
+            // times faster than Mos.
+            event.setIntegerValueField(.scrollWheelEventDeltaAxis1, value: 0)
+            event.setIntegerValueField(.scrollWheelEventDeltaAxis2, value: 0)
+            event.setIntegerValueField(.scrollWheelEventDeltaAxis3, value: 0)
+            event.setDoubleValueField(.scrollWheelEventFixedPtDeltaAxis1,
+                                      value: 0.0)
+            event.setDoubleValueField(.scrollWheelEventFixedPtDeltaAxis2,
+                                      value: 0.0)
+            event.setDoubleValueField(.scrollWheelEventFixedPtDeltaAxis3,
+                                      value: 0.0)
+            event.setDoubleValueField(.scrollWheelEventPointDeltaAxis1,
+                                      value: frame.vertical)
+            event.setDoubleValueField(.scrollWheelEventPointDeltaAxis2,
+                                      value: frame.horizontal)
+            event.setDoubleValueField(.scrollWheelEventPointDeltaAxis3,
+                                      value: 0.0)
+            event.setDoubleValueField(.scrollWheelEventIsContinuous, value: 1.0)
+            if let phase = frame.phase {
+                event.setDoubleValueField(.scrollWheelEventScrollPhase, value: phase.scroll)
+                event.setDoubleValueField(.scrollWheelEventMomentumPhase, value: phase.momentum)
+            }
+            event.setIntegerValueField(.eventSourceUserData,
+                                       value: Self.syntheticEventMarker)
+            // CGEventPostToPid is reliable in standalone Mos, but AZS also
+            // owns the session and ScrollToZoom taps. On current macOS builds
+            // direct cross-process delivery can be discarded even though the
+            // PostEvent preflight succeeds, leaving the consumed wheel event
+            // with no replacement. Post through the session boundary instead.
+            // The marker above makes MKEngineHook pass this frame through
+            // unchanged, so it cannot enter MOS recursively.
             event.post(tap: .cgSessionEventTap)
         }
     }
 
-    private static func writePixelEvent(_ event: CGEvent,
-                                        vertical: Int32,
-                                        horizontal: Int32,
-                                        verticalLine: Int64,
-                                        horizontalLine: Int64) {
-        event.setIntegerValueField(.scrollWheelEventIsContinuous, value: 1)
-        writeAxis(event,
-                  value: vertical,
-                  lineValue: verticalLine,
-                  line: .scrollWheelEventDeltaAxis1,
-                  fixed: .scrollWheelEventFixedPtDeltaAxis1,
-                  point: .scrollWheelEventPointDeltaAxis1)
-        writeAxis(event,
-                  value: horizontal,
-                  lineValue: horizontalLine,
-                  line: .scrollWheelEventDeltaAxis2,
-                  fixed: .scrollWheelEventFixedPtDeltaAxis2,
-                  point: .scrollWheelEventPointDeltaAxis2)
-        writeAxis(event,
-                  value: 0,
-                  lineValue: 0,
-                  line: .scrollWheelEventDeltaAxis3,
-                  fixed: .scrollWheelEventFixedPtDeltaAxis3,
-                  point: .scrollWheelEventPointDeltaAxis3)
-        event.setIntegerValueField(.scrollWheelEventScrollCount, value: 0)
-        event.setIntegerValueField(.scrollWheelEventScrollPhase, value: 0)
-        event.setIntegerValueField(.scrollWheelEventMomentumPhase, value: 0)
+    private func values(for phase: Phase) -> (scroll: Double, momentum: Double) {
+        switch phase {
+        case .idle: return (0, 0)
+        case .hold: return (128, 0)
+        case .trackingBegin: return (1, 0)
+        case .trackingOngoing: return (2, 0)
+        case .trackingEnd: return (4, 0)
+        case .momentumBegin: return (0, 1)
+        case .momentumOngoing: return (0, 2)
+        case .momentumEnd: return (0, 3)
+        case .leave: return (8, 0)
+        }
     }
 
-    private static func writeAxis(_ event: CGEvent,
-                                  value: Int32,
-                                  lineValue: Int64,
-                                  line: CGEventField,
-                                  fixed: CGEventField,
-                                  point: CGEventField) {
-        let pixels = Int64(value)
-        event.setIntegerValueField(line, value: lineValue)
-        event.setIntegerValueField(point, value: pixels)
-        event.setDoubleValueField(fixed, value: Double(lineValue))
+    private func targetPIDForPosting(_ event: CGEvent) -> pid_t {
+        let eventPID = pid_t(event.getIntegerValueField(.eventTargetUnixProcessID))
+        if eventPID > 1,
+           eventPID != ProcessInfo.processInfo.processIdentifier,
+           NSRunningApplication(processIdentifier: eventPID) != nil {
+            return eventPID
+        }
+        // The Mos reference normally receives the active target PID in the
+        // event. Some session-tap paths report 0/1 (or AZS itself) instead;
+        // posting to that sentinel consumes the original event but delivers
+        // no replacement. Resolve the actual frontmost application instead.
+        guard let frontmostPID = NSWorkspace.shared.frontmostApplication?.processIdentifier,
+              frontmostPID > 1,
+              frontmostPID != ProcessInfo.processInfo.processIdentifier else {
+            return 0
+        }
+        return frontmostPID
     }
 
-    private func isCurrentGeneration(_ value: UInt64) -> Bool {
-        lock.lock()
-        let current = enabled && generation == value
-        lock.unlock()
-        return current
+    private static func isRemoteSmoothedEvent(_ event: CGEvent) -> Bool {
+        // Mos only skips continuous events from known remote-control sources.
+        // Keeping this narrow is important for high-resolution mouse wheels.
+        let continuous = event.getDoubleValueField(.scrollWheelEventIsContinuous)
+        guard continuous == 1.0 else { return false }
+        let sourcePID = pid_t(event.getIntegerValueField(.eventSourceUnixProcessID))
+        guard sourcePID != 0,
+              let app = NSRunningApplication(processIdentifier: sourcePID) else {
+            return false
+        }
+        let remoteBundleIDs = [
+            "com.apple.ScreenSharing", "com.teamviewer.TeamViewer",
+            "com.anydesk.AnyDesk", "com.google.ChromeRemoteDesktop",
+            "com.microsoft.rdc.macos", "com.realvnc.vncviewer",
+            "com.rustdesk.RustDesk"
+        ]
+        if let bundleID = app.bundleIdentifier, remoteBundleIDs.contains(bundleID) {
+            return true
+        }
+        let remotePathKeywords = ["screensharingd", "teamviewer", "anydesk", "rustdesk"]
+        guard let path = app.executableURL?.path else { return false }
+        return remotePathKeywords.contains { path.localizedCaseInsensitiveContains($0) }
+    }
+}
+
+private struct MosWheelEvent {
+    let y: Axis
+    let x: Axis
+    let isTrackpad: Bool
+
+    struct Axis {
+        let line: Int64
+        let point: Double
+        let fixed: Double
+        let usable: Double
+        let valid: Bool
     }
 
-    private static func isDiscreteMouseWheel(_ event: CGEvent) -> Bool {
-        event.getIntegerValueField(.scrollWheelEventIsContinuous) == 0 &&
-            event.getIntegerValueField(.scrollWheelEventScrollPhase) == 0 &&
-            event.getIntegerValueField(.scrollWheelEventMomentumPhase) == 0
+    init(event: CGEvent) {
+        y = Self.read(event,
+                      line: .scrollWheelEventDeltaAxis1,
+                      point: .scrollWheelEventPointDeltaAxis1,
+                      fixed: .scrollWheelEventFixedPtDeltaAxis1)
+        x = Self.read(event,
+                      line: .scrollWheelEventDeltaAxis2,
+                      point: .scrollWheelEventPointDeltaAxis2,
+                      fixed: .scrollWheelEventFixedPtDeltaAxis2)
+        let phaseLooksContinuous = event.getDoubleValueField(.scrollWheelEventMomentumPhase) != 0.0 ||
+            event.getDoubleValueField(.scrollWheelEventScrollPhase) != 0.0 ||
+            event.getDoubleValueField(.scrollWheelEventScrollCount) != 0.0
+        // Mos deliberately treats Logitech Options' continuous mouse stream
+        // as a mouse, despite the phase fields it attaches to the event.
+        let sourcePID = pid_t(event.getIntegerValueField(.eventSourceUnixProcessID))
+        let sourceIsLogitechOptions = NSRunningApplication(processIdentifier: sourcePID)?.bundleIdentifier ==
+            "com.logitech.manager.daemon"
+        isTrackpad = phaseLooksContinuous && !sourceIsLogitechOptions
     }
 
-    private static func axisValue(_ event: CGEvent,
-                                  point: CGEventField,
-                                  fixed: CGEventField,
-                                  line: CGEventField) -> Double {
-        // PointDeltaAxis is an integer pixel field in CoreGraphics. Reading it
-        // through the double accessor returns zero on some mouse drivers.
-        let pointValue = Double(event.getIntegerValueField(point))
-        if pointValue != 0 { return pointValue }
+    var hasUsableDelta: Bool { (y.valid && y.usable != 0) || (x.valid && x.usable != 0) }
+
+    private static func read(_ event: CGEvent,
+                             line: CGEventField,
+                             point: CGEventField,
+                             fixed: CGEventField) -> Axis {
+        let lineValue = Int64(event.getIntegerValueField(line))
+        let pointValue = event.getDoubleValueField(point)
         let fixedValue = event.getDoubleValueField(fixed)
-        if fixedValue != 0 { return fixedValue }
-        return Double(event.getIntegerValueField(line))
+        if pointValue != 0 {
+            return Axis(line: lineValue, point: pointValue, fixed: fixedValue,
+                        usable: pointValue, valid: true)
+        }
+        if fixedValue != 0 {
+            return Axis(line: lineValue, point: pointValue, fixed: fixedValue,
+                        usable: fixedValue, valid: true)
+        }
+        if lineValue != 0 {
+            return Axis(line: lineValue, point: pointValue, fixed: fixedValue,
+                        usable: Double(lineValue), valid: true)
+        }
+        return Axis(line: lineValue, point: pointValue, fixed: fixedValue,
+                    usable: 0, valid: false)
+    }
+}
+
+private struct MosCurveFilter {
+    private var y = [0.0, 0.0]
+    private var x = [0.0, 0.0]
+
+    mutating func fill(with value: (y: Double, x: Double)) -> (y: Double, x: Double) {
+        y = polish(y, next: value.y)
+        x = polish(x, next: value.x)
+        return (y[0], x[0])
     }
 
-    private static func normalizedWheelValue(_ value: Double,
-                                             minimumStep: Double,
-                                             maximumStep: Double) -> Double {
-        guard value.isFinite, value != 0 else { return 0 }
-        let sign = value < 0 ? -1.0 : 1.0
-        let magnitude = min(max(abs(value), minimumStep), maximumStep)
-        return sign * magnitude
+    mutating func reset() {
+        y = [0, 0]
+        x = [0, 0]
+    }
+
+    private func polish(_ values: [Double], next: Double) -> [Double] {
+        let first = values[1]
+        let diff = next - first
+        return [first, first + 0.23 * diff, first + 0.5 * diff,
+                first + 0.77 * diff, next]
     }
 }
 
 private let azsSmoothScrollDisplayLinkCallback: CVDisplayLinkOutputCallback = {
-    _, _, outputTime, _, _, context in
+    _, _, _, _, _, context in
     guard let context else { return kCVReturnError }
     let engine = Unmanaged<AZSSmoothScrollEngine>.fromOpaque(context).takeUnretainedValue()
-    return engine.renderFrame(at: outputTime.pointee.hostTime)
+    return engine.renderFrame()
 }
 
 @_cdecl("AZSIsSyntheticSmoothScrollEvent")
