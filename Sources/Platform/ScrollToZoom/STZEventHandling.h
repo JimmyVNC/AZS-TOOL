@@ -12,6 +12,7 @@
 
 STZModes STZGetWorkingModes(void);
 bool STZSetWorkingModes(STZModes);
+bool STZAreTriggerFlagsDown(void);
 
 
 extern CFStringRef const kSTZWorkingModesDidChangeNotification;

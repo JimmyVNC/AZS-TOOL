@@ -117,8 +117,6 @@ static void postStateChanged(void) {
                              CGEventMaskBit(kCGEventFlagsChanged) |
                              CGEventMaskBit(kCGEventLeftMouseDown) |
                              CGEventMaskBit(kCGEventRightMouseDown) |
-                             CGEventMaskBit(kCGEventLeftMouseDragged) |
-                             CGEventMaskBit(kCGEventRightMouseDragged) |
                              CGEventMaskBit(kCGEventOtherMouseDown) |
                              CGEventMaskBit(kCGEventScrollWheel) |
                              (CGEventMask(1) << NX_SYSDEFINED));

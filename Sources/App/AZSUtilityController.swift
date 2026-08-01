@@ -1220,7 +1220,8 @@ final class AZSUtilityController: ObservableObject {
             // Smooth scrolling owns the complete discrete-wheel gesture. Only
             // consume after the engine confirms that its display-synchronised
             // replacement path is healthy; otherwise preserve native input.
-            if smooth && AZSSmoothScrollEngine.shared.process(event) {
+            if smooth && !AZSScrollToZoomShouldBypassMOS(),
+               AZSSmoothScrollEngine.shared.process(event) {
                 return true
             }
         }

@@ -11,4 +11,4 @@ void AZSConfigureScrollToZoom(bool enabled,
                               bool usesCommandKeys);
 void AZSStopScrollToZoom(void);
 bool AZSScrollToZoomUsesCommandKeys(void);
-
+bool AZSScrollToZoomShouldBypassMOS(void);

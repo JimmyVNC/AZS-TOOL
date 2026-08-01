@@ -179,6 +179,10 @@ static bool wheelTapsMutable = false;
 static bool triggerFlagsDown = false;
 static CFRunLoopTimerRef periodicTimer = NULL;
 
+bool STZAreTriggerFlagsDown(void) {
+    return triggerFlagsDown;
+}
+
 
 static bool needsReinsertTaps = false;
 static void anyEventTapAddedOrRemoved(CFNotificationCenterRef center, void *observer,

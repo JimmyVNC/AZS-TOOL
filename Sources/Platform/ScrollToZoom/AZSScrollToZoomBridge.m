@@ -55,6 +55,13 @@ bool AZSScrollToZoomUsesCommandKeys(void) {
     return AZSUsesCommandKeys;
 }
 
+bool AZSScrollToZoomShouldBypassMOS(void) {
+    // When the trigger is held, ScrollToZoom's hard/soft event-tap pipeline
+    // must own the physical wheel event. MOS must not consume it and later
+    // post a PID-targeted replacement that would bypass ScrollToZoom.
+    return AZSScrollToZoomEnabled && STZAreTriggerFlagsDown();
+}
+
 bool STZIsLoggingEnabled(void) {
     return false;
 }
