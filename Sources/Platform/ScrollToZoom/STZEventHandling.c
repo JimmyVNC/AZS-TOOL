@@ -14,6 +14,16 @@
 #include "STZProcessManager.h"
 #include "AZSScrollToZoomBridge.h"
 
+// Synthetic MOS frames are already normalized and must not be fed through
+// ScrollToZoom's soft state machine when no trigger is held. The marker is
+// intentionally private to the shared event contract and is not user-facing.
+static const int64_t kAZSSyntheticSmoothEventMarker = 0x415A53534D4F4F54LL;
+
+static bool isAZSSyntheticSmoothEvent(CGEventRef event) {
+    return CGEventGetIntegerValueField(event, kCGEventSourceUserData) ==
+        kAZSSyntheticSmoothEventMarker;
+}
+
 
 // The order of event taps reported by `CGGetEventTapList` is not documented.
 // In `STZSetWorkingModes`, soft event taps are always created after the hard one;
@@ -733,6 +743,10 @@ static CGEventRef passiveSoftWheelTapCallback(CGEventTapProxy proxy, CGEventType
     default: assert(type == kCGEventScrollWheel); break;
     }
 
+    if (isAZSSyntheticSmoothEvent(event)) {
+        return event;
+    }
+
     STZDebugLogEvent("Passive soft", event);
 
     WheelContext *context = wheelContextWithFallback(CGEventGetRegistryID(event));
@@ -746,6 +760,10 @@ static CGEventRef mutableSoftWheelTapCallback(CGEventTapProxy proxy, CGEventType
     case kCGEventTapDisabledByTimeout:      eventTapTimeout(); CF_FALLTHROUGH;
     case kCGEventTapDisabledByUserInput:    return NULL;
     default: assert(type == kCGEventScrollWheel); break;
+    }
+
+    if (isAZSSyntheticSmoothEvent(event)) {
+        return event;
     }
 
     STZDebugLogEvent("Mutable soft", event);

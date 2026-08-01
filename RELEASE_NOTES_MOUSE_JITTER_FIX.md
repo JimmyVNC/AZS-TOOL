@@ -25,6 +25,8 @@ Bản cập nhật này tập trung xử lý hiện tượng chuột bị giật
 - Khi giữ modifier zoom, MOS nhường wheel vật lý cho Scroll to Zoom; thả modifier sẽ quay lại cuộn MOS.
 - Nội suy và curve filter được chuẩn hóa theo elapsed time để giữ cảm giác tương đương trên màn hình 60 Hz và 120 Hz.
 - Thời gian gesture: theo dõi wheel 180 ms, xác nhận momentum-end 130 ms và dừng an toàn sau 250 ms không có output.
+- Synthetic scroll không ép lại `event.location` cũ; mỗi frame dùng vị trí con trỏ hiện tại để tránh kéo con trỏ về điểm bắt đầu gesture.
+- Scroll to Zoom bỏ qua synthetic MOS frame ở soft tap khi không giữ modifier, giảm callback main-thread trong momentum.
 
 ## Tương thích
 
@@ -38,7 +40,7 @@ Bản cập nhật này tập trung xử lý hiện tượng chuột bị giật
 Tải file DMG trong phần **Releases** của repository:
 
 ```text
-AZS-Tools-MOS-Scroll-Only-Smooth-Fix-v2.dmg
+AZS-Tools-MOS-Pointer-Smooth-v4.dmg
 ```
 
 ## Cài đặt
@@ -58,13 +60,13 @@ AZS-Tools-MOS-Scroll-Only-Smooth-Fix-v2.dmg
 SHA-256 của file DMG:
 
 ```text
-b6b265d25229967a0edc00c81f35b0ca90434d0cce999a580bd6d2bff0568b21
+940a4b77e7142681848018ec3e4146b1f70bb041cb705ec4a177830acf58894a
 ```
 
 Kiểm tra trên macOS:
 
 ```bash
-shasum -a 256 AZS-Tools-MOS-Scroll-Only-Smooth-Fix-v2.dmg
+shasum -a 256 AZS-Tools-MOS-Pointer-Smooth-v4.dmg
 ```
 
 ## Kiểm tra build
@@ -77,7 +79,7 @@ shasum -a 256 AZS-Tools-MOS-Scroll-Only-Smooth-Fix-v2.dmg
 
 ## Ghi chú kỹ thuật
 
-Luồng MOS được đối chiếu với [Mos](https://github.com/Caldis/Mos). Phần Scroll to Zoom tiếp tục sử dụng cấu trúc event tap/state manager của [ScrollToZoom](https://github.com/alphaArgon/ScrollToZoom). Bản v2 giữ callback display-link tối thiểu, worker single-flight, nội suy theo thời gian và dùng session post tương thích để không làm mất scroll trong trình duyệt.
+Luồng MOS được đối chiếu với [Mos](https://github.com/Caldis/Mos). Phần Scroll to Zoom tiếp tục sử dụng cấu trúc event tap/state manager của [ScrollToZoom](https://github.com/alphaArgon/ScrollToZoom). Bản hiện tại giữ callback display-link tối thiểu, worker single-flight, nội suy theo thời gian, session post tương thích và location hiện tại của con trỏ để tránh jitter.
 
 ## License
 

@@ -54,7 +54,6 @@ final class AZSSmoothScrollEngine {
         let capturedAt: CFTimeInterval
         let enqueuedAt: CFTimeInterval
         let flags: CGEventFlags
-        let location: CGPoint
         let vertical: Double
         let horizontal: Double
         let phase: (scroll: Double, momentum: Double)?
@@ -131,7 +130,6 @@ final class AZSSmoothScrollEngine {
     private var pendingPhaseAfterDelivery: Phase?
 
     private var capturedFlags: CGEventFlags = []
-    private var capturedLocation = CGPoint.zero
     private var targetPID: pid_t = 0
     private var capturedAt: CFTimeInterval = 0
     private var cachedFrontmostPID: pid_t = 0
@@ -298,7 +296,6 @@ final class AZSSmoothScrollEngine {
         }
 
         capturedFlags = event.flags
-        capturedLocation = event.location
         targetPID = postingPID
         capturedAt = now
         lastMeaningfulFrameTime = now
@@ -678,7 +675,6 @@ final class AZSSmoothScrollEngine {
         phase = .idle
         pendingPhaseAfterDelivery = nil
         capturedFlags = []
-        capturedLocation = .zero
         targetPID = 0
         capturedAt = 0
         lastMeaningfulFrameTime = 0
@@ -812,7 +808,6 @@ final class AZSSmoothScrollEngine {
                              capturedAt: capturedAt,
                              enqueuedAt: CFAbsoluteTimeGetCurrent(),
                              flags: capturedFlags,
-                             location: capturedLocation,
                              vertical: vertical,
                              horizontal: horizontal,
                              phase: phaseValues,
@@ -909,7 +904,6 @@ final class AZSSmoothScrollEngine {
             // IOHID attachment even after public mouse delta fields are zeroed,
             // which presents as an occasional cursor jump.
             event.flags = frame.flags
-            event.location = frame.location
             event.setIntegerValueField(.eventTargetUnixProcessID,
                                        value: Int64(frame.targetPID))
             event.setIntegerValueField(.scrollWheelEventDeltaAxis1, value: 0)
