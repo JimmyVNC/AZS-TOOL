@@ -88,7 +88,6 @@ final class AZSSmoothScrollEngine {
     private var capturedAt: CFTimeInterval = 0
     private var generation: UInt64 = 0
     private var lastDisplayLinkCallbackTime: CFTimeInterval = 0
-    private var recoveryScheduled = false
 
     private let manualContinuationThreshold: CFTimeInterval = 0.18
     private let manualSeparationThreshold: CFTimeInterval = 0.45
@@ -126,12 +125,16 @@ final class AZSSmoothScrollEngine {
         self.deadZone = boundedDeadZone
         self.simulatesTrackpad = simulatesTrackpad
         if changed { resetLocked(invalidateGeneration: true) }
-        if !enabled { recoveryScheduled = false }
+        let shouldStopPoster = changed || !enabled
         lock.unlock()
 
-        if enabled {
-            ensureDisplayLinkRunning()
-        } else {
+        // Match Mos's ScrollPoster lifecycle: configuration creates no active
+        // display work. The poster starts lazily on the first physical wheel
+        // event and stops again when that gesture is complete. Keeping a
+        // CVDisplayLink alive while idle needlessly wakes a high-priority
+        // callback at the display refresh rate and can make pointer delivery
+        // feel uneven when other utilities are enabled.
+        if shouldStopPoster {
             stopDisplayLink()
         }
     }
@@ -247,17 +250,18 @@ final class AZSSmoothScrollEngine {
     func resumeAfterWake() {
         let canPost = CGPreflightPostEventAccess()
         lock.lock()
-        let shouldResume = enabled
         postEventAccess = canPost
         lock.unlock()
-        if shouldResume { recreateDisplayLink() }
+        // Sleep ends any in-progress gesture. Remain stopped until the next
+        // real wheel event, as the standalone Mos poster does.
+        stopDisplayLink()
     }
 
     /// Refresh only the TCC delivery capability during the periodic event-tap
     /// health check. This must not recreate CVDisplayLink: that check runs every
-    /// three seconds, whereas a poster rebuild is reserved for a real wake or
-    /// event-tap replacement. Rebuilding here briefly stalls the main event-tap
-    /// thread and presents as intermittent pointer/scroll jitter.
+    /// three seconds, while the poster starts lazily from a real wheel event.
+    /// Rebuilding here briefly stalls the main event-tap thread and presents as
+    /// intermittent pointer/scroll jitter.
     func refreshPostEventAccess() {
         let canPost = CGPreflightPostEventAccess()
         lock.lock()
@@ -269,35 +273,48 @@ final class AZSSmoothScrollEngine {
         lock.unlock()
     }
 
-    /// Recreate the MOS poster after the shared Accessibility tap has been
-    /// created or rebuilt.  Startup config can run before TCC is ready, so the
-    /// poster must not be left as a pre-permission display-link session.
+    /// Reset MOS after the shared Accessibility tap has been created or
+    /// rebuilt. Startup config can run before TCC is ready, so a captured
+    /// gesture must not survive across the tap boundary.
     func restartAfterEventTap() {
         let canPost = CGPreflightPostEventAccess()
         lock.lock()
-        let shouldResume = enabled
         postEventAccess = canPost
         resetLocked(invalidateGeneration: true)
         lock.unlock()
-        if shouldResume { recreateDisplayLink() }
+        // Replacing the tap invalidates the old gesture, but is not itself a
+        // reason to run a display link while the mouse is idle.
+        stopDisplayLink()
     }
 
     private func ensureDisplayLinkRunning() {
         lock.lock()
         guard enabled else {
-            recoveryScheduled = false
             lock.unlock()
             return
         }
-        if let link = displayLink, CVDisplayLinkIsRunning(link) {
-            recoveryScheduled = false
+        if let link = displayLink {
+            if CVDisplayLinkIsRunning(link) {
+                lock.unlock()
+                return
+            }
             lock.unlock()
-            return
+            // Mos retains its stopped poster between wheel gestures and starts
+            // that same instance again. Avoid allocating a new display link at
+            // the first notch of every gesture.
+            if CVDisplayLinkStart(link) == kCVReturnSuccess {
+                lock.lock()
+                lastDisplayLinkCallbackTime = CFAbsoluteTimeGetCurrent()
+                lock.unlock()
+                return
+            }
+            lock.lock()
+            displayLink = nil
+            lock.unlock()
+            CVDisplayLinkStop(link)
+        } else {
+            lock.unlock()
         }
-        let oldLink = displayLink
-        displayLink = nil
-        lock.unlock()
-        if let oldLink, CVDisplayLinkIsRunning(oldLink) { CVDisplayLinkStop(oldLink) }
 
         var candidate: CVDisplayLink?
         guard CVDisplayLinkCreateWithActiveCGDisplays(&candidate) == kCVReturnSuccess,
@@ -307,9 +324,6 @@ final class AZSSmoothScrollEngine {
                                              Unmanaged.passUnretained(self).toOpaque()) == kCVReturnSuccess,
               CVDisplayLinkStart(candidate) == kCVReturnSuccess else {
             if let candidate { CVDisplayLinkStop(candidate) }
-            lock.lock()
-            recoveryScheduled = false
-            lock.unlock()
             NSLog("AZS MOS: CVDisplayLink could not be started; keeping native scroll")
             return
         }
@@ -318,31 +332,10 @@ final class AZSSmoothScrollEngine {
         if enabled && displayLink == nil {
             displayLink = candidate
             lastDisplayLinkCallbackTime = CFAbsoluteTimeGetCurrent()
-            recoveryScheduled = false
             lock.unlock()
         } else {
-            recoveryScheduled = false
             lock.unlock()
             CVDisplayLinkStop(candidate)
-        }
-    }
-
-    private func recreateDisplayLink() {
-        stopDisplayLink()
-        ensureDisplayLinkRunning()
-    }
-
-    private func scheduleDisplayLinkRecovery() {
-        lock.lock()
-        guard enabled, !recoveryScheduled else {
-            lock.unlock()
-            return
-        }
-        recoveryScheduled = true
-        resetLocked(invalidateGeneration: true)
-        lock.unlock()
-        DispatchQueue.main.async { [weak self] in
-            self?.recreateDisplayLink()
         }
     }
 
@@ -472,8 +465,7 @@ final class AZSSmoothScrollEngine {
         resetLocked(invalidateGeneration: false)
         lock.unlock()
         for frame in frames { enqueue(frame) }
-        // Keep the poster alive for the next physical wheel event.
-        ensureDisplayLinkRunning()
+        // The next physical wheel event starts a new poster lazily.
     }
 
     private func resetLocked(invalidateGeneration: Bool) {

@@ -520,7 +520,6 @@ final class AZSUtilityController: ObservableObject {
     private var actionsSnapshot: [Int: AZSMouseAction] = [:]
     private var applicationsSnapshot: [Int: String] = [:]
     private var lastExternalVolume: Float = 0.5
-    private var mouseRefreshTimer: Timer?
     private var actionHotKeyMonitors: [String: GlobalHotKey] = [:]
 
     private init() {
@@ -635,12 +634,11 @@ final class AZSUtilityController: ObservableObject {
                                                 simulatesTrackpad: smoothScrollSimulatesTrackpad)
         configureScrollToZoom()
         inputMonitoringGranted = CGPreflightListenEventAccess()
+        // Device inventory is refreshed once at startup and explicitly from
+        // the UI. A recurring scan invokes system_profiler/ioreg (and may open
+        // a Bluetooth HID device), which can briefly perturb a wireless mouse
+        // even though the work itself is dispatched off the main thread.
         refreshMouseDevices()
-        if mouseRefreshTimer == nil {
-            mouseRefreshTimer = Timer.scheduledTimer(withTimeInterval: 30, repeats: true) { [weak self] _ in
-                self?.refreshMouseDevices()
-            }
-        }
     }
 
     func refreshMouseDevices() {

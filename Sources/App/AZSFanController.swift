@@ -220,13 +220,47 @@ enum AZSPrivilegedSMC {
     }
 }
 
-struct AZSFanReading: Identifiable, Equatable {
+struct AZSFanReading: Identifiable, Equatable, Sendable {
     let id: Int
     var actualRPM: Double
     var minimumRPM: Double
     var maximumRPM: Double
     var targetRPM: Double
     var manual: Bool
+}
+
+private struct AZSFanRefreshSnapshot: Sendable {
+    let fans: [AZSFanReading]
+    let status: String
+}
+
+/// AppleSMC uses synchronous IOConnect calls. Read it away from the main
+/// run loop because the shared mouse event tap is serviced there as well.
+private func AZSReadFanSnapshot() -> AZSFanRefreshSnapshot {
+    let count = AZSSMCReadFanCount()
+    var newFans: [AZSFanReading] = []
+    if count > 0 {
+        for index in 0..<Int(count) {
+            var actual = 0.0, minimum = 0.0, maximum = 0.0, target = 0.0
+            var manual: Int32 = 0
+            if AZSSMCReadFan(Int32(index), &actual, &minimum, &maximum, &target, &manual) != 0 {
+                newFans.append(AZSFanReading(id: index,
+                                             actualRPM: actual,
+                                             minimumRPM: minimum,
+                                             maximumRPM: maximum,
+                                             targetRPM: target,
+                                             manual: manual != 0))
+            }
+        }
+    }
+
+    if !newFans.isEmpty {
+        return AZSFanRefreshSnapshot(fans: newFans, status: "Đang theo dõi AppleSMC")
+    }
+    if let error = String(validatingCString: AZSSMCLastError()), !error.isEmpty {
+        return AZSFanRefreshSnapshot(fans: [], status: error)
+    }
+    return AZSFanRefreshSnapshot(fans: [], status: "Không tìm thấy cảm biến SMC")
 }
 
 @MainActor
@@ -239,6 +273,9 @@ final class AZSFanController: ObservableObject {
     @Published private(set) var canControl = false
 
     private var timer: Timer?
+    private var refreshInFlight = false
+    private let refreshQueue = DispatchQueue(label: "site.vncard.azstools.smc.monitor",
+                                              qos: .utility)
     private init() {}
 
     func start() {
@@ -256,31 +293,17 @@ final class AZSFanController: ObservableObject {
     }
 
     func refresh() {
-        let count = AZSSMCReadFanCount()
-        var newFans: [AZSFanReading] = []
-        if count > 0 {
-            for index in 0..<Int(count) {
-                var actual = 0.0, minimum = 0.0, maximum = 0.0, target = 0.0
-                var manual: Int32 = 0
-                if AZSSMCReadFan(Int32(index), &actual, &minimum, &maximum, &target, &manual) != 0 {
-                    newFans.append(AZSFanReading(id: index,
-                                                 actualRPM: actual,
-                                                 minimumRPM: minimum,
-                                                 maximumRPM: maximum,
-                                                 targetRPM: target,
-                                                 manual: manual != 0))
-                }
+        guard !refreshInFlight else { return }
+        refreshInFlight = true
+        refreshQueue.async { [weak self] in
+            let snapshot = AZSReadFanSnapshot()
+            Task { @MainActor [weak self] in
+                guard let self else { return }
+                self.refreshInFlight = false
+                self.fans = snapshot.fans
+                self.isAvailable = !snapshot.fans.isEmpty
+                self.status = snapshot.status
             }
-        }
-
-        fans = newFans
-        isAvailable = !newFans.isEmpty
-        if isAvailable {
-            status = "Đang theo dõi AppleSMC"
-        } else if let error = String(validatingCString: AZSSMCLastError()) {
-            status = error.isEmpty ? "Không tìm thấy cảm biến SMC" : error
-        } else {
-            status = "Không tìm thấy cảm biến SMC"
         }
     }
 
