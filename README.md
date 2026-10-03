@@ -1,67 +1,75 @@
-# mkey — Bộ gõ Tiếng Việt cho macOS 26
+# AZS Tools — Bộ gõ tiếng Việt & tiện ích macOS
 
-**mkey** là bộ gõ tiếng Việt cho macOS, xây dựng lại từ engine của dự án mã nguồn mở
-[OpenKey](https://github.com/tuyenvm/OpenKey) (© Tuyen Mai, GPL v3) với giao diện
-hoàn toàn mới bằng SwiftUI, tối ưu cho macOS 26 (Tahoe trở lên, yêu cầu tối thiểu macOS 14).
+AZS Tools kết hợp bộ gõ Telex/VNI (engine OpenKey), Clipboard, điều khiển chuột/cuộn/zoom, âm thanh, màn hình và quạt. Yêu cầu macOS 14 trở lên; giao diện SwiftUI hỗ trợ Light/Dark Mode.
 
-## Có gì mới so với OpenKey
+## Trải nghiệm mới
 
-- **Giao diện SwiftUI hiện đại** kiểu System Settings: sidebar + form nhóm,
-  hỗ trợ Dark Mode tự nhiên, thay cho storyboard/Objective-C cũ.
-- **MenuBarExtra** thuần SwiftUI với icon VI/EN vẽ runtime (template image,
-  tự đổi màu theo menu bar sáng/tối).
-- **SMAppService** cho "Khởi động cùng macOS" — bỏ hẳn helper app
-  `OpenKeyHelper` và API `SMLoginItemSetEnabled` đã deprecated.
-- **Event tap tự hồi phục**: xử lý `kCGEventTapDisabledByTimeout` /
-  `ByUserInput` — trên macOS mới, tap hay bị hệ thống tắt ngầm khiến bộ gõ
-  "chết lặng"; mkey tự bật lại.
-- **Luồng xin quyền Trợ năng mới**: banner trong cửa sổ cài đặt + tự phát hiện
-  khi được cấp quyền (không cần khởi động lại app).
-- Engine C++ gốc được giữ **nguyên vẹn 100%** — mọi tính năng gõ (Telex/VNI,
-  5 bảng mã, gõ tắt, chuyển mã, smart switch…) hoạt động như OpenKey.
+- Tổng quan hiển thị quyền, trạng thái bộ gõ, thiết bị và công tắc điều khiển nhanh.
+- Cài đặt tách riêng Chuột & cuộn, Âm thanh & màn hình, Phím tắt và Quạt; có tìm kiếm và nhớ trang cuối.
+- Clipboard và cài đặt vẫn truy cập được khi bộ gõ chưa đủ quyền.
+- Bật/tắt âm thanh và độ sáng độc lập. Khi tắt cả hai, app dừng công việc DDC riêng.
+- Slider màn hình cập nhật UI ngay, gộp giá trị chờ theo từng điều khiển và giới hạn retry.
+- Preset cuộn Êm/Cân bằng/Nhanh, khôi phục từng nhóm, nhập/xuất cấu hình JSON có phiên bản.
+- Chẩn đoán chủ động xuất tại Hệ thống, không chứa văn bản gõ hoặc lịch sử Clipboard.
 
-## Cấu trúc
+Xem [kế hoạch](OPTIMIZATION_PLAN.md) và [kết quả triển khai, checklist kiểm thử](OPTIMIZATION_STATUS.md). Các mục tiêu hiệu suất chưa được coi là đạt nếu chưa đo trên thiết bị thực tế.
 
-```
-mkey/
-├── project.yml              # đặc tả XcodeGen
-├── scripts/make_icon.swift  # sinh app icon bằng CoreGraphics
-└── Sources/
-    ├── Engine/              # engine C++ nguyên gốc từ OpenKey (GPL v3)
-    ├── Platform/            # glue ObjC++: event tap, bridge engine ↔ Swift
-    │   ├── MKGlobals.h      # khai báo biến cấu hình cho Swift
-    │   ├── MKBridge.h/.mm   # facade: tap lifecycle, macro, chuyển mã
-    │   ├── MKEngineHook.mm  # CGEventTap callback + key synthesis
-    │   └── ScrollToZoom/    # các module C/ObjC gốc + adapter AZS mỏng
-    ├── App/                 # SwiftUI: MenuBarExtra, Settings, AppState
-    └── Support/             # Info.plist, entitlements, bridging header, assets
-```
+## Build chuẩn
 
-## Build
+Project chính là `AZSTools.xcodeproj`, scheme `AZSTools`; sản phẩm `AZS Tools.app`.
+Các project `mkey.xcodeproj` và `AZSTools 2/3/4.xcodeproj` là bản cũ, không dùng để build thay đổi này.
 
-Yêu cầu: macOS 14+, Xcode 16+ (đã kiểm thử với Xcode 26.5 trên macOS 26.5), [XcodeGen](https://github.com/yonaskolb/XcodeGen).
+Yêu cầu Xcode đã hoàn tất thiết lập ban đầu và license. Có thể build trực tiếp project đã lưu:
 
 ```bash
-brew install xcodegen
-cd mkey
-swift scripts/make_icon.swift Sources/Support/Assets.xcassets/AppIcon.appiconset  # nếu muốn sinh lại icon
-xcodegen generate
-xcodebuild -project mkey.xcodeproj -scheme mkey -configuration Release -derivedDataPath build
-open build/Build/Products/Release/   # chứa mkey.app
+xcodebuild -project AZSTools.xcodeproj -scheme AZSTools -configuration Debug -derivedDataPath build/Debug build
+xcodebuild -project AZSTools.xcodeproj -scheme AZSTools -configuration Release -destination 'generic/platform=macOS' -derivedDataPath build/Release build
+open "build/Release/Build/Products/Release/AZS Tools.app"
 ```
+
+Khi thay đổi danh sách nguồn, dùng XcodeGen để sinh lại từ `project.yml`:
+
+```bash
+xcodegen generate
+open AZSTools.xcodeproj
+```
+
+File trùng `Sources/App/AZSScrollToZoomEngine 2.swift` được giữ nguyên nhưng loại khỏi build. Helper SMC được build/ký trước khi app được ký. Cấu hình hiện tại dùng chữ ký ad-hoc, chưa phải bản notarized để phân phối.
+
+## Kiểm tra không điều khiển phần cứng
+
+```bash
+bash scripts/verify.sh --typecheck
+bash scripts/verify.sh --release
+bash scripts/verify.sh --tests
+AZS_VERIFY_ARCH=x86_64 bash scripts/verify.sh --typecheck
+```
+
+Các kiểm thử dùng transport màn hình giả; không bật event tap, không gửi lệnh SMC/DDC, không yêu cầu quyền hệ thống. Các tùy chọn `--release` và `--typecheck` kiểm tra compiler, không thay thế build app đầy đủ bằng Xcode. SDK/toolchain có thể đổi qua `DEVELOPER_DIR`, `AZS_VERIFY_SDK`, `AZS_VERIFY_ARCH`.
 
 ## Cài đặt & cấp quyền
 
-1. Kéo `mkey.app` vào thư mục **Applications**.
-2. Mở app — macOS sẽ hỏi quyền **Trợ năng (Accessibility)**:
-   System Settings → Privacy & Security → Accessibility → bật **mkey**.
-3. mkey tự phát hiện khi được cấp quyền và bắt đầu hoạt động (không cần mở lại).
-4. Phím chuyển Việt/Anh mặc định: **⌥Z** (đổi được trong Bảng điều khiển → Bộ gõ).
+1. Kéo `AZS Tools.app` vào Applications và chỉ chạy một bản app.
+2. Mở Tổng quan, cấp Trợ năng và Giám sát đầu vào cho đúng app trong System Settings → Privacy & Security.
+3. Quay lại app hoặc bấm Kiểm tra lại bộ gõ. Trạng thái chỉ sẵn sàng khi đủ hai quyền và event tap chạy.
+4. Chuyển Việt/Anh mặc định bằng **⌥Z**; chỉnh tại Bộ gõ.
 
-> **Lưu ý về chữ ký ad-hoc**: bản tự build được ký ad-hoc, nên **mỗi lần build
-> lại** macOS coi là app mới — bạn phải xoá mkey khỏi danh sách Accessibility
-> và cấp quyền lại. Nếu có Apple Developer ID, hãy đặt `DEVELOPMENT_TEAM`
-> trong `project.yml` để tránh điều này.
+Bản ad-hoc sau khi rebuild có thể cần xóa mục quyền cũ và thêm đúng app mới. Không tự động cấp quyền điều khiển quạt; thao tác này do người dùng chủ động thực hiện. Đóng trang quạt chỉ dừng đọc dữ liệu, không đổi chế độ quạt đang áp dụng.
+
+## Cấu hình & dữ liệu
+
+Xuất/nhập tại Hệ thống. File JSON không bao gồm lịch sử Clipboard, nội dung gõ tắt, quyền macOS, login item, iCloud hoặc tốc độ quạt. Các đường dẫn ứng dụng và danh sách app Trợ năng có thể có trong file cấu hình, nên kiểm tra trước khi chia sẻ.
+
+Nâng cấp giữ thiết lập hiện có. Migration Mos v3 có sẵn vẫn đổi tuning của engine cũ về bộ giá trị tương thích; tuning cũ được sao lưu tại key `AZSLegacyScrollTuningBackup`. Khôi phục nhóm Clipboard đặt giới hạn về 30 mục: mục chưa ghim vượt giới hạn có thể bị loại bỏ; mục ghim được giữ lại.
+
+## Cấu trúc
+
+- `Sources/Engine`: engine C++ OpenKey.
+- `Sources/Platform`: bridge ObjC++, event tap, SMC, ScrollToZoom.
+- `Sources/App`: SwiftUI, controller và cấu hình/chẩn đoán.
+- `Sources/Support`: Info.plist, entitlements và assets.
+- `Tests/OptimizationChecks.swift`: kiểm thử hồi quy không dùng phần cứng.
+- `project.yml`: đặc tả project/scheme chính.
 
 ## Giấy phép
 

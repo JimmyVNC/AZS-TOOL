@@ -69,7 +69,7 @@ final class UpdateChecker: ObservableObject {
             if isNewer(info.version, than: currentVersion) {
                 status = .available(info)
                 if !manual {
-                    // launch-time discovery: alert is shown by the app delegate
+                    // Launch-time discovery stays non-modal; the menu exposes it.
                     NotificationCenter.default.post(name: .mkUpdateAvailable, object: info)
                 }
             } else {

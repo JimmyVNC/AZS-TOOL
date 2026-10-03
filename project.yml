@@ -9,6 +9,16 @@ configs:
   Debug: debug
   Release: release
 
+schemes:
+  AZSTools:
+    build:
+      targets:
+        AZSTools: all
+    run:
+      config: Debug
+    archive:
+      config: Release
+
 settings:
   base:
     SWIFT_VERSION: "5.9"
@@ -47,6 +57,8 @@ targets:
         excludes:
           - AZSSMCHelperMain.mm
       - path: Sources/App
+        excludes:
+          - "AZSScrollToZoomEngine 2.swift"
       - path: Sources/Support
         includes:
           - "Assets.xcassets"

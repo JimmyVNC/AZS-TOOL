@@ -1,4 +1,4 @@
-# Đóng góp cho MKey
+# Đóng góp cho AZS Tools
 
 Cảm ơn bạn đã quan tâm tới MKey! Mọi đóng góp đều được hoan nghênh — sửa lỗi,
 thêm tính năng, cải thiện giao diện hay tài liệu.
@@ -22,11 +22,16 @@ giới thiệu bản thân hoặc liên hệ chủ repo.
 git clone https://github.com/maclifevn/mkey.git
 cd mkey
 xcodegen generate
-open mkey.xcodeproj
+open AZSTools.xcodeproj
 ```
 
-> File `mkey.xcodeproj` được sinh tự động từ `project.yml`, nên **không** commit
-> nó. Khi thêm/bớt file nguồn, chỉ cần chạy lại `xcodegen generate`.
+Project chính là `AZSTools.xcodeproj`, scheme `AZSTools`, được sinh từ
+`project.yml`. Khi thêm/bớt nguồn, chạy lại `xcodegen generate`; không chỉnh
+những project mkey hoặc AZSTools có hậu tố số vì đó là bản cũ.
+
+Trước khi bàn giao, chạy `bash scripts/verify.sh --tests` và build Debug/Release
+theo README. Test không thay thế QA thiết bị và quyền macOS; dùng checklist trong
+`OPTIMIZATION_STATUS.md` để ghi rõ phần đã kiểm chứng.
 
 ## Cấu trúc mã
 

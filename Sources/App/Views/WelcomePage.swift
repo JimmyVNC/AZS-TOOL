@@ -6,220 +6,244 @@
 import SwiftUI
 
 struct WelcomePage: View {
-    @EnvironmentObject private var state: AppState
-    @State private var isPulsing = false
-    @State private var didCompleteOnboarding = false
+  @EnvironmentObject private var state: AppState
+  @State private var isPulsing = false
+  @State private var didCompleteOnboarding = false
+  @State private var showAdvancedHelp = false
 
-    private var runningFromApplications: Bool {
-        let path = Bundle.main.bundleURL
-            .resolvingSymlinksInPath()
-            .standardizedFileURL
-            .path
-        return path.hasPrefix("/Applications/")
-    }
+  private var permissionStatus: String {
+    if !state.accessibilityGranted { return "Bước 1: bật quyền Trợ năng" }
+    if !state.inputMonitoringGranted { return "Bước 2: bật quyền Giám sát đầu vào" }
+    return state.eventTapRunning ? "Bộ gõ đã sẵn sàng" : "Đã đủ quyền — đang kiểm tra bộ gõ"
+  }
 
-    var body: some View {
-        VStack(spacing: 16) {
-            Spacer()
+  private var runningFromApplications: Bool {
+    let path = Bundle.main.bundleURL
+      .resolvingSymlinksInPath()
+      .standardizedFileURL
+      .path
+    return path.hasPrefix("/Applications/")
+  }
 
-            // App Icon with a soft shadow and glow
-            ZStack {
-                Circle()
-                    .fill(Color.accentColor.opacity(0.12))
-                    .frame(width: 96, height: 96)
-                    .blur(radius: 10)
-                
-                if let icon = NSApp.applicationIconImage {
-                    Image(nsImage: icon)
-                        .resizable()
-                        .frame(width: 66, height: 66)
-                        .shadow(color: .black.opacity(0.18), radius: 8, y: 4)
-                } else {
-                    Image(systemName: "keyboard")
-                    .font(.system(size: 44))
-                        .foregroundStyle(Color.accentColor)
-                }
-            }
+  var body: some View {
+    VStack(spacing: 16) {
+      Spacer()
 
-            // Welcome Text
-            VStack(spacing: 6) {
-                Text("Chào mừng đến với AZS Tools")
-                    .font(.system(size: 22, weight: .bold, design: .rounded))
-                    .foregroundStyle(.primary)
+      // App Icon with a soft shadow and glow
+      ZStack {
+        Circle()
+          .fill(Color.accentColor.opacity(0.12))
+          .frame(width: 96, height: 96)
+          .blur(radius: 10)
 
-                Text("Bộ gõ Tiếng Việt hiện đại, an toàn và siêu nhẹ cho macOS.")
-                    .font(.system(size: 13, weight: .regular))
-                    .foregroundStyle(.secondary)
-                    .multilineTextAlignment(.center)
-            }
-            .padding(.horizontal, 32)
+        if let icon = NSApp.applicationIconImage {
+          Image(nsImage: icon)
+            .resizable()
+            .frame(width: 66, height: 66)
+            .shadow(color: .black.opacity(0.18), radius: 8, y: 4)
+        } else {
+          Image(systemName: "keyboard")
+            .font(.system(size: 44))
+            .foregroundStyle(Color.accentColor)
+        }
+      }
 
-            // Permissions Instruction Card
-            VStack(alignment: .leading, spacing: 12) {
-                HStack(alignment: .top, spacing: 12) {
-                    Image(systemName: "lock.shield.fill")
-                        .font(.title3)
-                        .foregroundStyle(Color.accentColor)
-                    
-                    VStack(alignment: .leading, spacing: 6) {
-                        Text("Cần bật hai quyền hệ thống")
-                            .font(.headline)
-                            .foregroundStyle(.primary)
+      // Welcome Text
+      VStack(spacing: 6) {
+        Text("Chào mừng đến với AZS Tools")
+          .font(.system(size: 22, weight: .bold, design: .rounded))
+          .foregroundStyle(.primary)
 
-                        permissionRow("Trợ năng (Accessibility)", granted: state.accessibilityGranted)
-                        permissionRow("Giám sát đầu vào (Input Monitoring)", granted: state.inputMonitoringGranted)
+        Text("Bộ gõ Tiếng Việt hiện đại, an toàn và siêu nhẹ cho macOS.")
+          .font(.system(size: 13, weight: .regular))
+          .foregroundStyle(.secondary)
+          .multilineTextAlignment(.center)
+      }
+      .padding(.horizontal, 32)
 
-                        Text("Bộ gõ cần các quyền này để nhận phím; truy vấn pin Logitech/Razer cần Input Monitoring.")
-                            .font(.subheadline)
-                            .foregroundStyle(.secondary)
-                            .lineSpacing(2)
-                    }
-                }
+      // Permissions Instruction Card
+      VStack(alignment: .leading, spacing: 12) {
+        HStack(alignment: .top, spacing: 12) {
+          Image(systemName: "lock.shield.fill")
+            .font(.title3)
+            .foregroundStyle(Color.accentColor)
 
-                Divider()
+          VStack(alignment: .leading, spacing: 6) {
+            Text("Cần bật hai quyền hệ thống")
+              .font(.headline)
+              .foregroundStyle(.primary)
 
-                Text("Sau mỗi bản ad-hoc mới: trong từng mục quyền, dùng dấu “–” xóa AZS Tools cũ, nhấn “+”, chọn đúng /Applications/AZS Tools.app rồi bật lại.")
-                    .font(.footnote)
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
+            permissionRow("Trợ năng (Accessibility)", granted: state.accessibilityGranted)
+            permissionRow(
+              "Giám sát đầu vào (Input Monitoring)", granted: state.inputMonitoringGranted)
 
-                if !runningFromApplications {
-                    Label {
-                        Text("App đang chạy ngoài /Applications. Hãy thoát app, kéo vào Applications rồi mở lại trước khi cấp quyền.")
-                    } icon: {
-                        Image(systemName: "exclamationmark.triangle.fill")
-                    }
-                    .font(.footnote.weight(.medium))
-                    .foregroundStyle(.orange)
-
-                    Text(Bundle.main.bundlePath)
-                        .font(.caption2.monospaced())
-                        .foregroundStyle(.tertiary)
-                        .lineLimit(2)
-                        .textSelection(.enabled)
-                }
-            }
-            .padding(14)
-            .background(.quaternary.opacity(0.2))
-            .clipShape(RoundedRectangle(cornerRadius: 12))
-            .overlay(
-                RoundedRectangle(cornerRadius: 12)
-                    .stroke(.quaternary.opacity(0.3), lineWidth: 1)
+            Text(
+              "Bộ gõ cần các quyền này để nhận phím; truy vấn pin Logitech/Razer cần Input Monitoring."
             )
-            .padding(.horizontal, 32)
-
-            // CTA and Status
-            VStack(spacing: 10) {
-                HStack(spacing: 10) {
-                    Button {
-                        openAccessibilitySettings()
-                    } label: {
-                        Label("Trợ năng", systemImage: "figure.wave")
-                    }
-                    .buttonStyle(.borderedProminent)
-
-                    Button {
-                        openInputMonitoringSettings()
-                    } label: {
-                        Label("Input Monitoring", systemImage: "keyboard")
-                    }
-                    .buttonStyle(.bordered)
-                }
-                .controlSize(.large)
-
-                Button("Đã thêm lại cả hai quyền — kiểm tra") {
-                    refreshPermissionState()
-                    NotificationCenter.default.post(name: .mkRecheckAccessibility, object: nil)
-                }
-                .buttonStyle(.bordered)
-
-                // Pulsing Status Indicator
-                HStack(spacing: 8) {
-                    Circle()
-                        .fill(Color.orange)
-                        .frame(width: 8, height: 8)
-                        .opacity(isPulsing ? 0.3 : 1.0)
-                        .scaleEffect(isPulsing ? 1.3 : 1.0)
-                    
-                    Text("Đang chờ đủ Accessibility và Input Monitoring...")
-                        .font(.footnote)
-                        .foregroundStyle(.secondary)
-                }
-                .onAppear {
-                    withAnimation(.easeInOut(duration: 1.2).repeatForever(autoreverses: true)) {
-                        isPulsing = true
-                    }
-                }
-            }
-
-            Spacer()
+            .font(.subheadline)
+            .foregroundStyle(.secondary)
+            .lineSpacing(2)
+          }
         }
-        .frame(width: 480)
-        .frame(maxHeight: .infinity)
-        .background(VisualEffectBlur(material: .sidebar))
-        .ignoresSafeArea()
+
+        Divider()
+
+        DisclosureGroup("Đã bật quyền nhưng vẫn chưa hoạt động?", isExpanded: $showAdvancedHelp) {
+          Text(
+            "Sau bản tự build mới: trong từng mục quyền, xóa AZS Tools cũ rồi thêm đúng /Applications/AZS Tools.app và bật lại."
+          )
+          .font(.footnote)
+          .foregroundStyle(.secondary)
+          .fixedSize(horizontal: false, vertical: true)
+        }
+
+        if !runningFromApplications {
+          Label {
+            Text(
+              "App đang chạy ngoài /Applications. Hãy thoát app, kéo vào Applications rồi mở lại trước khi cấp quyền."
+            )
+          } icon: {
+            Image(systemName: "exclamationmark.triangle.fill")
+          }
+          .font(.footnote.weight(.medium))
+          .foregroundStyle(.orange)
+
+          Text(Bundle.main.bundlePath)
+            .font(.caption2.monospaced())
+            .foregroundStyle(.tertiary)
+            .lineLimit(2)
+            .textSelection(.enabled)
+        }
+      }
+      .padding(14)
+      .background(.quaternary.opacity(0.2))
+      .clipShape(RoundedRectangle(cornerRadius: 12))
+      .overlay(
+        RoundedRectangle(cornerRadius: 12)
+          .stroke(.quaternary.opacity(0.3), lineWidth: 1)
+      )
+      .padding(.horizontal, 32)
+
+      // CTA and Status
+      VStack(spacing: 10) {
+        HStack(spacing: 10) {
+          Button {
+            openAccessibilitySettings()
+          } label: {
+            Label("Trợ năng", systemImage: "figure.wave")
+          }
+          .buttonStyle(.borderedProminent)
+
+          Button {
+            openInputMonitoringSettings()
+          } label: {
+            Label("Input Monitoring", systemImage: "keyboard")
+          }
+          .buttonStyle(.bordered)
+        }
+        .controlSize(.large)
+
+        Button("Đã thêm lại cả hai quyền — kiểm tra") {
+          refreshPermissionState()
+          NotificationCenter.default.post(name: .mkRecheckAccessibility, object: nil)
+        }
+        .buttonStyle(.bordered)
+
+        // Pulsing Status Indicator
+        HStack(spacing: 8) {
+          Circle()
+            .fill(Color.orange)
+            .frame(width: 8, height: 8)
+            .opacity(isPulsing ? 0.3 : 1.0)
+            .scaleEffect(isPulsing ? 1.3 : 1.0)
+
+          Text(permissionStatus)
+            .font(.footnote)
+            .foregroundStyle(.secondary)
+        }
         .onAppear {
-            refreshPermissionState()
-            DispatchQueue.main.async {
-                if let window = NSApp.windows.first(where: { $0.identifier?.rawValue.hasPrefix("welcome") == true }) {
-                    window.titlebarAppearsTransparent = true
-                    window.titleVisibility = .hidden
-                    window.isMovableByWindowBackground = true
-                    window.isOpaque = false
-                    window.backgroundColor = .clear
-                    window.makeKeyAndOrderFront(nil)
-                }
-            }
+          withAnimation(.easeInOut(duration: 1.2).repeatForever(autoreverses: true)) {
+            isPulsing = true
+          }
         }
-        .onReceive(state.$accessibilityGranted) { _ in
-            completeOnboardingIfReady()
-        }
-        .onReceive(state.$inputMonitoringGranted) { _ in
-            completeOnboardingIfReady()
-        }
-        .onReceive(state.$eventTapRunning) { _ in
-            completeOnboardingIfReady()
-        }
-        .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
-            refreshPermissionState()
-            NotificationCenter.default.post(name: .mkRecheckAccessibility, object: nil)
-        }
-    }
+      }
 
-    @ViewBuilder
-    private func permissionRow(_ title: String, granted: Bool) -> some View {
-        Label(title, systemImage: granted ? "checkmark.circle.fill" : "xmark.circle.fill")
-            .font(.subheadline.weight(.medium))
-            .foregroundStyle(granted ? Color.green : Color.orange)
+      Spacer()
     }
-
-    private func refreshPermissionState() {
-        state.accessibilityGranted = AXIsProcessTrusted()
-        state.inputMonitoringGranted = CGPreflightListenEventAccess()
-    }
-
-    private func completeOnboardingIfReady() {
-        guard !didCompleteOnboarding,
-              state.engineReady else { return }
-        didCompleteOnboarding = true
-        if let welcomeWindow = NSApp.windows.first(where: { $0.identifier?.rawValue == "welcome" }) {
-            welcomeWindow.close()
+    .frame(width: 480)
+    .frame(maxHeight: .infinity)
+    .background(VisualEffectBlur(material: .sidebar))
+    .ignoresSafeArea()
+    .onAppear {
+      refreshPermissionState()
+      DispatchQueue.main.async {
+        if let window = NSApp.windows.first(where: {
+          $0.identifier?.rawValue.hasPrefix("welcome") == true
+        }) {
+          window.titlebarAppearsTransparent = true
+          window.titleVisibility = .hidden
+          window.isMovableByWindowBackground = true
+          window.isOpaque = false
+          window.backgroundColor = .clear
+          window.makeKeyAndOrderFront(nil)
         }
-        NotificationCenter.default.post(name: .mkOpenSettingsWindow, object: nil)
-        NSApp.activate(ignoringOtherApps: true)
+      }
     }
+    .onReceive(state.$accessibilityGranted) { _ in
+      completeOnboardingIfReady()
+    }
+    .onReceive(state.$inputMonitoringGranted) { _ in
+      completeOnboardingIfReady()
+    }
+    .onReceive(state.$eventTapRunning) { _ in
+      completeOnboardingIfReady()
+    }
+    .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification))
+    { _ in
+      refreshPermissionState()
+      NotificationCenter.default.post(name: .mkRecheckAccessibility, object: nil)
+    }
+  }
 
-    private func openAccessibilitySettings() {
-        NotificationCenter.default.post(name: .mkRequestAccessibility, object: nil)
-        if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility") {
-            NSWorkspace.shared.open(url)
-        }
-    }
+  @ViewBuilder
+  private func permissionRow(_ title: String, granted: Bool) -> some View {
+    Label(title, systemImage: granted ? "checkmark.circle.fill" : "xmark.circle.fill")
+      .font(.subheadline.weight(.medium))
+      .foregroundStyle(granted ? Color.green : Color.orange)
+  }
 
-    private func openInputMonitoringSettings() {
-        _ = CGRequestListenEventAccess()
-        if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_ListenEvent") {
-            NSWorkspace.shared.open(url)
-        }
+  private func refreshPermissionState() {
+    state.accessibilityGranted = AXIsProcessTrusted()
+    state.inputMonitoringGranted = CGPreflightListenEventAccess()
+  }
+
+  private func completeOnboardingIfReady() {
+    guard !didCompleteOnboarding,
+      state.engineReady
+    else { return }
+    didCompleteOnboarding = true
+    if let welcomeWindow = NSApp.windows.first(where: { $0.identifier?.rawValue == "welcome" }) {
+      welcomeWindow.close()
     }
+    NotificationCenter.default.post(name: .mkOpenSettingsWindow, object: nil)
+    NSApp.activate(ignoringOtherApps: true)
+  }
+
+  private func openAccessibilitySettings() {
+    NotificationCenter.default.post(name: .mkRequestAccessibility, object: nil)
+    if let url = URL(
+      string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility")
+    {
+      NSWorkspace.shared.open(url)
+    }
+  }
+
+  private func openInputMonitoringSettings() {
+    _ = CGRequestListenEventAccess()
+    if let url = URL(
+      string: "x-apple.systempreferences:com.apple.preference.security?Privacy_ListenEvent")
+    {
+      NSWorkspace.shared.open(url)
+    }
+  }
 }
